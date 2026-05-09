@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.x"
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install
+        run: uv sync --all-extras
+      - name: Lint
+        run: uv run ruff check src tests
+      - name: Test
+        run: xvfb-run -a uv run pytest -v
+      - name: Audit dependencies
+        run: uv run pip-audit --strict || true
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.x"
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install
+        run: uv sync --all-extras
+      - name: Smoke build .app
+        run: uv run python setup.py py2app -A
+      - name: Ad-hoc codesign
+        run: codesign --force --deep --sign - dist/PrintDesktop.app || true
+      - name: Verify bundle
+        run: |
+          test -d dist/PrintDesktop.app
+          test -f dist/PrintDesktop.app/Contents/Info.plist
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    needs: [test-linux, build-macos]
+    env:
+      TAG_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install
+        run: uv sync --extra build
+      - name: Build .app
+        run: uv run python setup.py py2app
+      - name: Codesign
+        run: codesign --force --deep --sign - dist/PrintDesktop.app
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "3D Print Desktop" \
+            -srcfolder dist/PrintDesktop.app \
+            -ov -format UDZO \
+            "dist/PrintDesktop-${TAG_NAME}.dmg"
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/PrintDesktop-*.dmg
