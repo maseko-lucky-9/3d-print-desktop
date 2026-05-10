@@ -5,7 +5,6 @@ schema accepts cost columns directly instead of a calculation_id reference).
 We hand-mirror it here for now; once Stream A is merged, regenerate from the
 backend's openapi.json via datamodel-code-generator (per plan §16 C2)."""
 
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -13,7 +12,7 @@ from pydantic import BaseModel, Field
 class FilamentSku(BaseModel):
     id: int
     name: str
-    color: Optional[str] = None
+    color: str | None = None
     grams_remaining: float
     cost_per_gram: float
 
@@ -27,7 +26,7 @@ class JobPayload(BaseModel):
     """
 
     filament_sku_id: int
-    model_id: Optional[int] = None
+    model_id: int | None = None
     slicer_grams: float = Field(..., ge=0)
     slicer_seconds: int = Field(..., ge=0)
 
@@ -47,7 +46,7 @@ class JobPayload(BaseModel):
     profit: float = Field(..., ge=0)
     selling_price: float = Field(..., ge=0)
 
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class PrintJob(BaseModel):
@@ -55,32 +54,32 @@ class PrintJob(BaseModel):
 
     id: int
     state: str  # sliced | queued | printing | done | failed | cancelled
-    filament_sku_id: Optional[int] = None
-    model_id: Optional[int] = None
-    slicer_grams: Optional[float] = None
-    slicer_seconds: Optional[int] = None
-    total_cost: Optional[float] = None
-    selling_price: Optional[float] = None
-    error_message: Optional[str] = None
+    filament_sku_id: int | None = None
+    model_id: int | None = None
+    slicer_grams: float | None = None
+    slicer_seconds: int | None = None
+    total_cost: float | None = None
+    selling_price: float | None = None
+    error_message: str | None = None
     created_at: str
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
+    started_at: str | None = None
+    finished_at: str | None = None
 
 
 class PrinterStatus(BaseModel):
     online: bool = False
     gcode_state: str = "UNKNOWN"
-    percentage: Optional[float] = None
-    remaining_time: Optional[int] = None
-    nozzle_temp: Optional[float] = None
-    bed_temp: Optional[float] = None
-    current_layer: Optional[int] = None
-    total_layers: Optional[int] = None
+    percentage: float | None = None
+    remaining_time: int | None = None
+    nozzle_temp: float | None = None
+    bed_temp: float | None = None
+    current_layer: int | None = None
+    total_layers: int | None = None
 
 
 class MakerWorldImport(BaseModel):
     id: int
     url: str
     status: str  # pending | success | failed
-    model_id: Optional[int] = None
-    error_message: Optional[str] = None
+    model_id: int | None = None
+    error_message: str | None = None

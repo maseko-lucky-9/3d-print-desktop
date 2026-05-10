@@ -5,10 +5,9 @@ for marketing — this is a personal tool, no aspirational signaling needed.
 The three live icons map to actual user actions.
 """
 
+import qtawesome as qta
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
-
-import qtawesome as qta
 
 from print_desktop.theme import tokens as t
 

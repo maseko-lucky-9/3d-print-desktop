@@ -1,9 +1,8 @@
 """ProjectCard widget — one card per PrintJob, used in the home grid."""
 
+import qtawesome as qta
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout
-
-import qtawesome as qta
 
 from print_desktop.models.print_request import PrintJob
 from print_desktop.theme import tokens as t

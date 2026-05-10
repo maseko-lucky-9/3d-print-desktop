@@ -15,7 +15,8 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox
 from print_desktop import __version__
 from print_desktop.models.print_request import JobPayload
 from print_desktop.services.api_client import ApiClient, wait_for_makerworld
-from print_desktop.storage.settings import Settings, save as save_settings
+from print_desktop.storage.settings import Settings
+from print_desktop.storage.settings import save as save_settings
 from print_desktop.ui.home import HomeView
 
 log = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ class MainWindow(QMainWindow):
         if isinstance(geo, (bytes, bytearray, QByteArray)):
             self.restoreGeometry(geo)
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event) -> None:  # noqa: N802 — Qt override
         qs = QSettings("PrintDesktop", "Window")
         qs.setValue("geometry", self.saveGeometry())
         # Persist any settings updates made during the session

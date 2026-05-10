@@ -8,9 +8,8 @@ Layout follows ReelSmith landing pattern (plan §7.5) translated for Option E:
 """
 
 import logging
-from typing import Callable
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
@@ -19,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from print_desktop.models.print_request import FilamentSku, JobPayload, PrintJob
+from print_desktop.models.print_request import FilamentSku, PrintJob
 from print_desktop.storage.settings import Settings
 from print_desktop.ui.widgets.feature_icons import FeatureIcons
 from print_desktop.ui.widgets.manual_form import ManualForm

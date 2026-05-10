@@ -6,7 +6,6 @@ Single shared httpx.AsyncClient per process, opened at startup, closed at shutdo
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Optional
 
 import httpx
 
@@ -20,7 +19,7 @@ from print_desktop.models.print_request import (
 
 
 class ApiClient:
-    def __init__(self, base_url: str, ca_path: Optional[Path] = None, timeout: float = 30.0):
+    def __init__(self, base_url: str, ca_path: Path | None = None, timeout: float = 30.0):
         verify: bool | str = str(ca_path) if ca_path and ca_path.exists() else True
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
@@ -42,7 +41,7 @@ class ApiClient:
         return [PrintJob.model_validate(x) for x in r.json()]
 
     async def list_history(
-        self, limit: int = 200, cursor: Optional[int] = None
+        self, limit: int = 200, cursor: int | None = None
     ) -> list[PrintJob]:
         params: dict[str, int] = {"limit": limit}
         if cursor is not None:
@@ -51,7 +50,7 @@ class ApiClient:
         r.raise_for_status()
         return [PrintJob.model_validate(x) for x in r.json()]
 
-    async def get_job_thumbnail(self, job_id: int) -> Optional[bytes]:
+    async def get_job_thumbnail(self, job_id: int) -> bytes | None:
         r = await self._client.get(f"/api/jobs/{job_id}/thumbnail")
         if r.status_code == 404:
             return None
@@ -95,7 +94,7 @@ class ApiClient:
 async def wait_for_makerworld(
     client: ApiClient,
     import_id: int,
-    on_status: Optional[Callable[[str], Awaitable[None]]] = None,
+    on_status: Callable[[str], Awaitable[None]] | None = None,
     timeout_seconds: int = 60,
     poll_interval_seconds: float = 2.0,
 ) -> MakerWorldImport:

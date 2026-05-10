@@ -5,7 +5,6 @@ types grams + hours read off BambuStudio GUI's preview pane, and the cost panel
 to the right updates live as they type.
 """
 
-from typing import Callable
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -16,7 +15,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -139,13 +137,13 @@ class ManualForm(QWidget):
             ("selling_price", "Selling price"),
         ]:
             row = QHBoxLayout()
-            l = QLabel(label, self)
-            l.setProperty("muted", True)
-            v = QLabel("R 0.00", self)
-            self._cost_labels[key] = v
-            row.addWidget(l)
+            lbl = QLabel(label, self)
+            lbl.setProperty("muted", True)
+            value = QLabel("R 0.00", self)
+            self._cost_labels[key] = value
+            row.addWidget(lbl)
             row.addStretch(1)
-            row.addWidget(v)
+            row.addWidget(value)
             panel.addLayout(row)
 
         panel.addStretch(1)

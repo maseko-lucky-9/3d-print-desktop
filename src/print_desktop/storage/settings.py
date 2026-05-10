@@ -5,7 +5,7 @@ breaking changes; provide migration in this module.
 """
 
 import tomllib
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import tomli_w

@@ -4,18 +4,16 @@ Translated from ReelSmith's `routes/index.tsx:84-130` hero section
 (see plan §7.5 element-mapping table) — 3D-printing variant.
 """
 
+import qtawesome as qta
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QLineEdit,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
-
-import qtawesome as qta
 
 PLACEHOLDERS = [
     "Drop a MakerWorld link…",
