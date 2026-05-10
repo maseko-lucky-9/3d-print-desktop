@@ -26,6 +26,7 @@ dev = [
 ]
 build = [
     "py2app>=0.28",
+    "setuptools<70",
 ]
 
 [project.scripts]

@@ -8,9 +8,25 @@ Post-build:
     open dist/PrintDesktop.app
 """
 
+import sys
 from pathlib import Path
 
 from setuptools import setup
+
+# Only patch py2app when actually building the bundle; keep this script importable
+# during plain wheel builds (uv sync) where py2app isn't installed.
+if "py2app" in sys.argv:
+    import py2app.build_app as _p2a_build
+
+    _orig_finalize = _p2a_build.py2app.finalize_options
+
+    def _patched_finalize(self):
+        # py2app rejects any non-empty install_requires; pyproject.toml's
+        # `dependencies` get auto-merged in, so we strip it before its check.
+        self.distribution.install_requires = []
+        return _orig_finalize(self)
+
+    _p2a_build.py2app.finalize_options = _patched_finalize
 
 ROOT = Path(__file__).resolve().parent
 ENTRY = ROOT / "src" / "print_desktop" / "__main__.py"
