@@ -5,7 +5,7 @@ for marketing — this is a personal tool, no aspirational signaling needed.
 The three live icons map to actual user actions.
 """
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 import qtawesome as qta
@@ -47,10 +47,10 @@ class FeatureIcons(QWidget):
             text.setProperty("dim", True)
             text.setMaximumWidth(80)
             text.setWordWrap(True)
-            text.setAlignment(text.alignment())
+            text.setAlignment(Qt.AlignCenter)
 
-            cell.addWidget(btn, alignment=cell.alignment() or 0)
-            cell.addWidget(text, alignment=cell.alignment() or 0)
+            cell.addWidget(btn, alignment=Qt.AlignCenter)
+            cell.addWidget(text, alignment=Qt.AlignCenter)
             holder = QWidget(self)
             holder.setLayout(cell)
             layout.addWidget(holder)
