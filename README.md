@@ -49,3 +49,4 @@ open dist/PrintDesktop.app
 
 Companion repo: `git@github.com:maseko-lucky-9/3d-printing-cost-calculator-app.git`.
 Default backend URL: `https://print-calc.homelab` (Tailscale only).
+
