@@ -9,3 +9,4 @@ dist/
 *.dmg
 *.app
 .DS_Store
+ruvector.db
