@@ -39,11 +39,11 @@ jobs:
       - name: Smoke build .app
         run: uv run python setup.py py2app -A
       - name: Ad-hoc codesign
-        run: codesign --force --deep --sign - dist/PrintDesktop.app || true
+        run: codesign --force --deep --sign - "dist/3D Print Desktop.app" || true
       - name: Verify bundle
         run: |
-          test -d dist/PrintDesktop.app
-          test -f dist/PrintDesktop.app/Contents/Info.plist
+          test -d "dist/3D Print Desktop.app"
+          test -f "dist/3D Print Desktop.app/Contents/Info.plist"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -61,11 +61,11 @@ jobs:
       - name: Build .app
         run: uv run python setup.py py2app
       - name: Codesign
-        run: codesign --force --deep --sign - dist/PrintDesktop.app
+        run: codesign --force --deep --sign - "dist/3D Print Desktop.app"
       - name: Create DMG
         run: |
           hdiutil create -volname "3D Print Desktop" \
-            -srcfolder dist/PrintDesktop.app \
+            -srcfolder "dist/3D Print Desktop.app" \
             -ov -format UDZO \
             "dist/PrintDesktop-${TAG_NAME}.dmg"
       - name: Upload to release
