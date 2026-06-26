@@ -17,9 +17,11 @@ types them into the app manually.
 ## Rationale
 
 BambuStudio CLI and OrcaSlicer segfault on macOS ARM64 when slicing with P1S profiles.
-The crash is a known upstream bug across the entire BambuStudio fork lineage. The spike is
-recorded in `~/.claude/plans/i-want-to-change-golden-pine.md §21`. No workaround exists
-short of running a remote slicer or waiting for upstream fixes.
+The crash is reproduced across both slicers independently. The original spike record
+(`~/.claude/plans/i-want-to-change-golden-pine.md §21`) no longer exists on disk; a
+re-spike is required before the root cause (headless GL context, partial profiles, or
+arm64 codegen bug) and any fix can be confirmed. No workaround has been proven; this
+decision stands until a re-spike with ≥10/10 reliable headless runs is recorded here.
 
 ## Consequences
 

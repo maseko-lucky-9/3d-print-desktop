@@ -20,7 +20,7 @@ class FilamentSku(BaseModel):
 class JobPayload(BaseModel):
     """What we POST to /api/jobs (multipart-encoded; cost columns are form fields).
 
-    Per plan §21 Option E: we don't upload a sliced_file — the user slices in
+    Option E (ADR-002): we don't upload a sliced_file — the user slices in
     BambuStudio GUI and sends to printer separately. We're recording the cost
     intent against a filament SKU, not registering a sliced artifact.
     """

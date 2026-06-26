@@ -14,6 +14,6 @@ All notable changes to this project will be documented in this file. Format: [Ke
 - Crash reporter writing tracebacks to `~/Library/Logs/PrintDesktop/`.
 
 ### Known limitations
-- No in-app slicing (BambuStudio/OrcaSlicer CLI segfault on macOS ARM64 — see plan §21).
+- No in-app slicing (BambuStudio/OrcaSlicer CLI segfault on macOS ARM64 — see ADR-002; re-spike required).
 - Single printer hardcoded via backend env vars.
 - macOS only.

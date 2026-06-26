@@ -14,7 +14,7 @@
 
 ## Why no in-app slicing?
 
-BambuStudio CLI and OrcaSlicer (stable + nightly) both segfault on macOS ARM64 when slicing with P1S profiles — same upstream bug across the whole BambuStudio fork lineage. See `~/.claude/plans/i-want-to-change-golden-pine.md` §21 for the spike record. Slicing happens in the BambuStudio GUI; this app is the cost-calculation + history layer.
+BambuStudio CLI and OrcaSlicer (stable + nightly) both segfault on macOS ARM64 when slicing with P1S profiles. The original spike record no longer exists; a re-spike is needed before this can be resolved. See `docs/decisions/002-no-in-app-slicing.md` for the decision and the re-spike requirements. Until then, slicing happens in the BambuStudio GUI and this app is the cost-calculation + history layer.
 
 ## Stack
 
