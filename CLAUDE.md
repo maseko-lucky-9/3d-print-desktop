@@ -25,7 +25,7 @@ uv run python -m print_desktop # run dev
 uv run pytest                  # tests
 
 uv run python setup.py py2app  # build .app
-codesign --force --deep --sign - dist/PrintDesktop.app
+codesign --force --deep --sign - "dist/3D Print Desktop.app"
 ```
 
 ## Backend

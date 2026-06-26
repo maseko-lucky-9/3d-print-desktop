@@ -4,8 +4,8 @@ Usage:
     uv run python setup.py py2app
 
 Post-build:
-    codesign --force --deep --sign - dist/PrintDesktop.app
-    open dist/PrintDesktop.app
+    codesign --force --deep --sign - "dist/3D Print Desktop.app"
+    open "dist/3D Print Desktop.app"
 """
 
 import sys
