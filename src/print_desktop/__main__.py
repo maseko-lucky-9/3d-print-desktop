@@ -32,6 +32,10 @@ def main() -> None:
 
     settings = settings_module.load()
     ca = _bundled_ca_path()
+    if ca is None and settings.ca_cert_path:
+        p = Path(settings.ca_cert_path)
+        if p.exists():
+            ca = p
 
     app = QApplication(sys.argv)
     app.setApplicationName("3D Print Desktop")

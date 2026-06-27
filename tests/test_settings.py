@@ -14,7 +14,8 @@ def test_defaults_load_when_no_file(tmp_path, monkeypatch):
     assert s.backend_url == "https://print-calc.homelab"
     assert s.electricity_rate == 2.50
     assert s.onboarded is False
-    assert s.schema_version == 1
+    assert s.schema_version == 3
+    assert s.makerworld_session_cookie == ""
 
 
 def test_round_trip(tmp_path, monkeypatch):
@@ -47,6 +48,29 @@ def test_corrupt_file_falls_back_to_defaults(tmp_path, monkeypatch):
     assert s.backend_url == "https://print-calc.homelab"  # default
 
 
+def test_v1_migrates_to_v3(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings_module, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(settings_module, "SETTINGS_PATH", tmp_path / "settings.toml")
+    (tmp_path / "settings.toml").write_text(
+        'schema_version = 1\nbackend_url = "https://print-calc.homelab"\n', encoding="utf-8"
+    )
+    s = load()
+    assert s.schema_version == 3
+    assert s.makerworld_session_cookie == ""
+
+
+def test_v2_migrates_to_v3(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings_module, "SETTINGS_DIR", tmp_path)
+    monkeypatch.setattr(settings_module, "SETTINGS_PATH", tmp_path / "settings.toml")
+    (tmp_path / "settings.toml").write_text(
+        'schema_version = 2\nbackend_url = "https://print-calc.homelab"\napi_token = "tok"\n',
+        encoding="utf-8",
+    )
+    s = load()
+    assert s.schema_version == 3
+    assert s.makerworld_session_cookie == ""
+
+
 def test_save_creates_directory(tmp_path, monkeypatch):
     target_dir = tmp_path / "nested" / "PrintDesktop"
     monkeypatch.setattr(settings_module, "SETTINGS_DIR", target_dir)
@@ -55,4 +79,4 @@ def test_save_creates_directory(tmp_path, monkeypatch):
     assert (target_dir / "settings.toml").exists()
     with (target_dir / "settings.toml").open("rb") as f:
         raw = tomllib.load(f)
-    assert raw["schema_version"] == 1
+    assert raw["schema_version"] == 3

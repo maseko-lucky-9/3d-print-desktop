@@ -10,7 +10,7 @@ from pathlib import Path
 
 import tomli_w
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 3
 SETTINGS_DIR = Path.home() / "Library" / "Application Support" / "PrintDesktop"
 SETTINGS_PATH = SETTINGS_DIR / "settings.toml"
 
@@ -22,6 +22,7 @@ class Settings:
     # Backend
     backend_url: str = "https://print-calc.homelab"
     ca_cert_path: str = ""  # bundled with .app; resolved at runtime
+    makerworld_session_cookie: str = ""  # MakerWorld browser session cookie for model imports
 
     # Cost defaults (user can override per job in the Workflow form)
     electricity_rate: float = 2.50  # R per kWh
@@ -65,7 +66,13 @@ def _migrate_and_construct(raw: dict) -> Settings:
     v1: initial schema (this version). No migrations yet.
     """
     raw.setdefault("schema_version", 1)
-    # Future: if raw["schema_version"] < CURRENT_SCHEMA_VERSION: migrate
+    # v1 -> v2: api_token existed briefly; unknown-field filtering now drops it.
+    if raw["schema_version"] < 2:
+        raw["schema_version"] = 2
+    # v2 -> v3: makerworld_session_cookie added
+    if raw["schema_version"] < 3:
+        raw.setdefault("makerworld_session_cookie", "")
+        raw["schema_version"] = 3
     # Drop unknown fields to stay forward-compatible.
     known_fields = {f.name for f in Settings.__dataclass_fields__.values()}  # type: ignore[attr-defined]
     filtered = {k: v for k, v in raw.items() if k in known_fields}
