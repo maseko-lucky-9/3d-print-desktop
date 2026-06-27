@@ -19,13 +19,39 @@ from print_desktop.models.print_request import (
 
 
 class ApiClient:
-    def __init__(self, base_url: str, ca_path: Path | None = None, timeout: float = 30.0):
-        verify: bool | str = str(ca_path) if ca_path and ca_path.exists() else True
+    def __init__(
+        self,
+        base_url: str,
+        ca_path: Path | None = None,
+        timeout: float = 30.0,
+        makerworld_session_cookie: str = "",
+    ):
+        import os
+        import warnings
+
+        # ponytail: dev-only escape hatch for mismatched ingress SAN;
+        # never active in optimised builds.
+        if __debug__ and os.getenv("PRINT_DESKTOP_SKIP_TLS_VERIFY"):
+            warnings.warn(
+                "PRINT_DESKTOP_SKIP_TLS_VERIFY is set — TLS verification DISABLED. "
+                "Fix the backend cert SAN before deploying.",
+                stacklevel=2,
+            )
+            verify: bool | str = False
+        else:
+            verify = str(ca_path) if ca_path and ca_path.exists() else True
+        self._base_url = base_url.rstrip("/")
+        self._verify = verify
+        self._timeout = timeout
+        self._mw_cookie = makerworld_session_cookie
         self._client = httpx.AsyncClient(
-            base_url=base_url.rstrip("/"),
-            verify=verify,
-            timeout=timeout,
+            base_url=self._base_url,
+            verify=self._verify,
+            timeout=self._timeout,
         )
+
+    def set_makerworld_cookie(self, cookie: str) -> None:
+        self._mw_cookie = cookie
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -81,7 +107,8 @@ class ApiClient:
         return PrinterStatus.model_validate(r.json())
 
     async def import_makerworld(self, url: str) -> MakerWorldImport:
-        r = await self._client.post("/api/makerworld/import", json={"url": url})
+        payload: dict = {"url": url, "session_cookie": self._mw_cookie or ""}
+        r = await self._client.post("/api/makerworld/import", json=payload)
         r.raise_for_status()
         return MakerWorldImport.model_validate(r.json())
 
