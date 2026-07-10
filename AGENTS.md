@@ -1,4 +1,4 @@
-# 3D Print Desktop — CLAUDE.md
+# 3D Print Desktop — AGENTS.md
 
 ## Problem statement
 Cost-attribute every 3D print job tied to a real filament SKU + printer hourly + electricity

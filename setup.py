@@ -4,8 +4,8 @@ Usage:
     uv run python setup.py py2app
 
 Post-build:
-    codesign --force --deep --sign - dist/PrintDesktop.app
-    open dist/PrintDesktop.app
+    codesign --force --deep --sign - "dist/3D Print Desktop.app"
+    open "dist/3D Print Desktop.app"
 """
 
 import sys
@@ -34,13 +34,17 @@ ENTRY = ROOT / "src" / "print_desktop" / "__main__.py"
 DATA_FILES = []
 ca_path = ROOT / "homelab-ca.pem"
 if ca_path.exists():
-    DATA_FILES.append(("", [str(ca_path)]))
+    DATA_FILES.append(("", ["homelab-ca.pem"]))
 
 OPTIONS = {
     "argv_emulation": False,
     "packages": ["print_desktop"],
     "includes": ["qasync", "qtawesome"],
-    "iconfile": str(ROOT / "resources" / "icon.icns") if (ROOT / "resources" / "icon.icns").exists() else None,
+    "iconfile": (
+        str(ROOT / "resources" / "icon.icns")
+        if (ROOT / "resources" / "icon.icns").exists()
+        else None
+    ),
     "plist": {
         "CFBundleName": "3D Print Desktop",
         "CFBundleDisplayName": "3D Print Desktop",
