@@ -162,13 +162,10 @@ class MainWindow(QMainWindow):
             imp = await self._client.import_makerworld(url)
             result = await wait_for_makerworld(self._client, imp.id, timeout_seconds=60)
         except Exception as exc:
-            message = str(exc)
-            if self._settings.makerworld_session_cookie:
-                message += (
-                    "\n\nYour MakerWorld cookie may have expired. "
-                    "Re-copy it via File > MakerWorld cookie..."
-                )
-            QMessageBox.critical(self, "MakerWorld import failed", message)
+            # Transport-level failure (backend unreachable, timeout, 5xx): show the raw
+            # error. The cookie-expiry hint belongs only on the failed-status path below,
+            # where the backend reached MakerWorld and the import genuinely failed.
+            QMessageBox.critical(self, "MakerWorld import failed", str(exc))
             return
         if result.status == "success":
             QMessageBox.information(
