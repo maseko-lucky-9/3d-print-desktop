@@ -185,6 +185,11 @@ class ManualForm(QWidget):
             label = f"{sku.name}"
             if sku.color:
                 label += f" — {sku.color}"
+            # Available grams, not on-hand: filament already reserved for a
+            # queued job cannot be promised to this one. Showing it here is the
+            # difference between picking a spool and discovering at print time
+            # that it is spoken for.
+            label += f"  ({sku.grams_remaining:.0f}g free)"
             self.sku_combo.addItem(label, userData=sku.id)
         self.sku_combo.blockSignals(False)
 

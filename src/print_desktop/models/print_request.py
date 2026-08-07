@@ -6,15 +6,46 @@ We hand-mirror it here for now; once Stream A is merged, regenerate from the
 backend's openapi.json via datamodel-code-generator (per plan §16 C2)."""
 
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class FilamentSku(BaseModel):
+    """A filament SKU as `GET /api/filaments/skus` actually returns it.
+
+    THIS MODEL DID NOT MATCH THE API AND NEVER HAS. It required `name`,
+    `grams_remaining` and `cost_per_gram`; the backend returns `display_name`,
+    `available_grams` and `current_avg_cost_per_g`. `model_validate` raised
+    ValidationError on every response, and `MainWindow._refresh_async` catches
+    Exception broadly and only logs — so the SKU dropdown was silently empty and
+    every job went out with `filament_sku_id=0` via the `or 0` fallback in
+    ManualCostForm. Nothing surfaced it because nothing asserted it.
+
+    Fixed with validation aliases rather than by renaming the attributes: the
+    widgets read `sku.name` / `sku.color` / `sku.cost_per_gram`, and the point of
+    this change is to make the picker work, not to churn the UI.
+
+    Defaults on the numeric fields because they are derived server-side and a
+    SKU with no lots legitimately reports nothing.
+
+    The long-term fix is still the one the module docstring describes —
+    generate this from the backend's openapi.json — which is what would have
+    caught the mismatch the day it appeared.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
     id: int
-    name: str
-    color: str | None = None
-    grams_remaining: float
-    cost_per_gram: float
+    # "brand material colour", assembled by the backend so both clients agree.
+    name: str = Field(validation_alias=AliasChoices("display_name", "name"))
+    color: str | None = Field(default=None, validation_alias=AliasChoices("colour", "color"))
+    # On-hand minus outstanding reservations — what this spool can actually be
+    # promised for, not merely what is physically wound on it.
+    grams_remaining: float = Field(
+        default=0.0, validation_alias=AliasChoices("available_grams", "grams_remaining")
+    )
+    cost_per_gram: float = Field(
+        default=0.0, validation_alias=AliasChoices("current_avg_cost_per_g", "cost_per_gram")
+    )
 
 
 class JobPayload(BaseModel):
