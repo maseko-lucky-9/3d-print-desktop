@@ -31,6 +31,7 @@ Two failure modes matter here, so this file checks both:
    not just against the file on disk.
 """
 
+import re
 import shutil
 import ssl
 import subprocess
@@ -70,6 +71,15 @@ def _openssl_x509(*args: str) -> str:
     return result.stdout
 
 
+def _normalize_dn(raw: str) -> str:
+    """openssl's -subject/-issuer oneline format isn't consistent across
+    builds: OpenSSL 3.6 (Homebrew, macOS) prints `CN=X`; the OpenSSL that
+    ships on the ubuntu-latest CI runner prints `CN = X` (spaced around
+    `=`). Confirmed by running this suite on both — collapse the spacing
+    rather than tie the test to one build's formatting choice."""
+    return re.sub(r"\s*=\s*", "=", raw)
+
+
 def _parse_cert_date(dates_output: str, field: str) -> datetime:
     prefix = f"{field}="
     (line,) = [ln for ln in dates_output.splitlines() if ln.startswith(prefix)]
@@ -99,8 +109,8 @@ def test_ca_bundle_is_a_real_ca_not_the_nginx_fallback_cert():
 
 @_needs_openssl
 def test_ca_bundle_is_not_the_acme_co_fallback_cert():
-    subject = _openssl_x509("-subject")
-    issuer = _openssl_x509("-issuer")
+    subject = _normalize_dn(_openssl_x509("-subject"))
+    issuer = _normalize_dn(_openssl_x509("-issuer"))
     for marker in _FAKE_FALLBACK_MARKERS:
         assert marker not in subject, f"bundled cert subject is the fake fallback cert: {subject!r}"
         assert marker not in issuer, f"bundled cert issuer is the fake fallback cert: {issuer!r}"
@@ -111,8 +121,8 @@ def test_ca_bundle_identity_is_the_real_homelab_ca():
     """Positive check, not just "isn't the known-bad cert": a CA:TRUE cert
     for any *other* wrong identity would pass every check above it. Subject
     and issuer must both match, and must be equal — this CA is self-signed."""
-    subject = _openssl_x509("-subject")
-    issuer = _openssl_x509("-issuer")
+    subject = _normalize_dn(_openssl_x509("-subject"))
+    issuer = _normalize_dn(_openssl_x509("-issuer"))
     assert _EXPECTED_CN in subject and _EXPECTED_O in subject, (
         f"unexpected subject: {subject!r}"
     )
