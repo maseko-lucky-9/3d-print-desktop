@@ -1,6 +1,7 @@
 """Entry point. `python -m print_desktop` or via the py2app .app bundle."""
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -15,10 +16,22 @@ from print_desktop.ui.main_window import MainWindow
 
 def _bundled_ca_path() -> Path | None:
     """Locate the homelab CA bundled at <App>.app/Contents/Resources/homelab-ca.pem
-    or alongside the source tree during dev. Returns None if missing."""
+    or alongside the source tree during dev. Returns None if missing.
+
+    py2app is not PyInstaller: it never sets `sys._MEIPASS` (that is a
+    PyInstaller-only convention). At runtime inside a frozen bundle, py2app
+    sets `sys.frozen = "macosx_app"` and the RESOURCEPATH environment
+    variable to <App>.app/Contents/Resources — the directory `data_files`
+    with an empty destination (as setup.py uses for this file) actually
+    copies into. Deriving the path via `__file__` instead only works in dev,
+    because inside the bundle `__main__.py` is relocated under
+    Contents/Resources/lib/pythonX.Y/print_desktop/, three parents up from
+    which is Contents/Resources/lib — not Contents/Resources.
+    """
+    resource_dir = os.environ.get("RESOURCEPATH")
     candidates = [
+        Path(resource_dir) / "homelab-ca.pem" if resource_dir else None,
         Path(__file__).resolve().parent.parent.parent / "homelab-ca.pem",
-        Path(getattr(sys, "_MEIPASS", "")) / "homelab-ca.pem" if hasattr(sys, "_MEIPASS") else None,
     ]
     for c in candidates:
         if c and c.exists():
