@@ -34,7 +34,11 @@ ENTRY = ROOT / "src" / "print_desktop" / "__main__.py"
 DATA_FILES = []
 ca_path = ROOT / "homelab-ca.pem"
 if ca_path.exists():
-    DATA_FILES.append(("", [str(ca_path)]))
+    # setuptools' data_files requires paths relative to this setup.py's
+    # directory ("/-separated", never absolute) — an absolute path here
+    # makes plain `uv sync` / `pip install -e .` fail at the editable-wheel
+    # build step, not just py2app builds.
+    DATA_FILES.append(("", [ca_path.relative_to(ROOT).as_posix()]))
 
 OPTIONS = {
     "argv_emulation": False,
