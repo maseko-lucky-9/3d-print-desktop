@@ -49,6 +49,7 @@ jobs:
         run: |
           test -d "dist/3D Print Desktop.app"
           test -f "dist/3D Print Desktop.app/Contents/Info.plist"
+          test -f "dist/3D Print Desktop.app/Contents/Resources/homelab-ca.pem"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -65,6 +66,11 @@ jobs:
         run: uv sync --extra build
       - name: Build .app
         run: uv run python setup.py py2app
+      - name: Verify bundle
+        run: |
+          test -d "dist/3D Print Desktop.app"
+          test -f "dist/3D Print Desktop.app/Contents/Info.plist"
+          test -f "dist/3D Print Desktop.app/Contents/Resources/homelab-ca.pem"
       - name: Codesign
         run: codesign --force --deep --sign - "dist/3D Print Desktop.app"
       - name: Create DMG
