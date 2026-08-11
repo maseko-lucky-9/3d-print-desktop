@@ -10,7 +10,7 @@ from pathlib import Path
 
 import tomli_w
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 SETTINGS_DIR = Path.home() / "Library" / "Application Support" / "PrintDesktop"
 SETTINGS_PATH = SETTINGS_DIR / "settings.toml"
 
@@ -22,16 +22,6 @@ class Settings:
     # Backend
     backend_url: str = "https://print-calc.homelab"
     ca_cert_path: str = ""  # bundled with .app; resolved at runtime
-
-    # Cost defaults (user can override per job in the Workflow form)
-    electricity_rate: float = 2.50  # R per kWh
-    power_watts: float = 200.0
-    printer_hourly_cost: float = 5.00  # depreciation per hour
-    profit_margin_pct: float = 50.0
-
-    # Filament defaults (also overridable per job)
-    filament_size_g: float = 1000.0  # standard 1 kg spool
-    filament_price: float = 300.0  # default cost per spool
 
     # Window state (managed by MainWindow)
     window_geometry: str = ""  # base64-encoded QByteArray
@@ -62,10 +52,17 @@ def save(s: Settings) -> None:
 def _migrate_and_construct(raw: dict) -> Settings:
     """Apply schema migrations then construct a Settings object.
 
-    v1: initial schema (this version). No migrations yet.
+    v1: initial schema.
+    v2 (Phase 5 of the costing-engine plan): dropped electricity_rate,
+    power_watts, printer_hourly_cost, profit_margin_pct, filament_size_g and
+    filament_price. Those rates now live server-side (GET/PUT /api/settings,
+    the printers API) so every client quotes off the same numbers — see the
+    module docstring. No explicit migration code is needed for the removal
+    itself: the existing known-fields filter below already drops any key
+    that isn't a current dataclass field, which is exactly what a v1 TOML
+    file full of now-obsolete rate keys needs to happen to it.
     """
     raw.setdefault("schema_version", 1)
-    # Future: if raw["schema_version"] < CURRENT_SCHEMA_VERSION: migrate
     # Drop unknown fields to stay forward-compatible.
     known_fields = {f.name for f in Settings.__dataclass_fields__.values()}  # type: ignore[attr-defined]
     filtered = {k: v for k, v in raw.items() if k in known_fields}

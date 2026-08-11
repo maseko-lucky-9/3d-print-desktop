@@ -1,12 +1,15 @@
 """Manual cost-entry form — the heart of Option E (§21).
 
-User picks a filament SKU from a dropdown (populated from /api/filaments/skus),
-types grams + hours read off BambuStudio GUI's preview pane, and the cost panel
-to the right updates live as they type.
+User picks a filament SKU and a printer, types grams/hours read off
+BambuStudio GUI's preview pane, and the cost panel to the right updates from
+a debounced `POST /api/quote` round trip — every price line is server-computed
+(§Phase 3/4/5 of the costing-engine plan), never recomputed locally. The old
+free-form "no SKU, enter price manually" escape hatch is gone: the engine
+always prices off a real SKU's FIFO/weighted-average cost and a real
+printer's purchase price / expected life hours, never a client-guessed rate.
 """
 
-
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -19,23 +22,53 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from print_desktop.models.print_request import FilamentSku, JobPayload
-from print_desktop.services.cost import calculate_costs
-from print_desktop.storage.settings import Settings
+from print_desktop.models.print_request import (
+    AppSettings,
+    FilamentSku,
+    JobPayload,
+    Printer,
+    QuoteResult,
+)
+
+QUOTE_DEBOUNCE_MS = 400
 
 
 class ManualForm(QWidget):
-    """Form widget — emits payload_ready(JobPayload) on Save click."""
+    """Form widget — emits payload_ready(JobPayload) on Save click and
+    quote_requested(dict) whenever the debounced quote inputs change."""
 
     payload_ready = Signal(object)  # JobPayload
+    quote_requested = Signal(int, dict)  # seq, kwargs for ApiClient.quote()
 
-    def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._settings = settings
         self._skus: list[FilamentSku] = []
+        self._printers: list[Printer] = []
+        self._app_settings: AppSettings | None = None
+        self._app_settings_applied = False
+        self._last_quote: QuoteResult | None = None
+        # The quote response doesn't echo labour_rate_per_hour (only the
+        # labour_cost it produced), but _validate_costs on save recomputes
+        # labour_cost from labour_minutes*labour_rate and checks it against
+        # direct_cost — so whatever labour_rate accompanies a save MUST be
+        # the rate this specific quote was actually priced with, not
+        # whatever self._app_settings has evolved into since (a settings-tab
+        # save updates self._app_settings without invalidating an on-screen
+        # quote, by design — see set_app_settings). Frozen at fire time in
+        # _fire_quote, applied alongside the response in set_quote_result,
+        # gated by the same seq check as everything else about that quote.
+        self._last_quote_labour_rate: float | None = None
+        self._pending_labour_rate: float | None = None
+        # Debouncing does not stop two requests from both being in flight at
+        # once (change -> fire A -> change again before A resolves -> fire
+        # B). Without this, a slow A arriving after a fast B would overwrite
+        # B's fresher numbers on screen — a stale price silently replacing a
+        # correct one right before Save. Every response carries the seq it
+        # was requested with; only the most recent one is ever applied.
+        self._quote_seq = 0
         self._build_ui()
         self._connect_change_signals()
-        self._update_costs()
+        self._update_save_enabled()
 
     # ── UI ───────────────────────────────────────────────────────────────────
 
@@ -50,7 +83,10 @@ class ManualForm(QWidget):
         form.setSpacing(10)
 
         self.sku_combo = QComboBox(self)
-        self.sku_combo.addItem("(no SKU — enter price manually)", userData=None)
+        self.sku_combo.addItem("(select a filament SKU)", userData=None)
+
+        self.printer_combo = QComboBox(self)
+        self.printer_combo.addItem("(select a printer)", userData=None)
 
         self.grams_input = QDoubleSpinBox(self)
         self.grams_input.setRange(0, 100_000)
@@ -64,56 +100,55 @@ class ManualForm(QWidget):
         self.hours_input.setDecimals(2)
         self.hours_input.setValue(0.0)
 
-        self.spool_size_input = QDoubleSpinBox(self)
-        self.spool_size_input.setRange(1, 50_000)
-        self.spool_size_input.setSuffix(" g")
-        self.spool_size_input.setDecimals(0)
-        self.spool_size_input.setValue(self._settings.filament_size_g)
-
-        self.spool_price_input = QDoubleSpinBox(self)
-        self.spool_price_input.setRange(0, 100_000)
-        self.spool_price_input.setPrefix("R ")
-        self.spool_price_input.setDecimals(2)
-        self.spool_price_input.setValue(self._settings.filament_price)
-
-        self.electricity_input = QDoubleSpinBox(self)
-        self.electricity_input.setRange(0, 100)
-        self.electricity_input.setPrefix("R ")
-        self.electricity_input.setSuffix(" / kWh")
-        self.electricity_input.setDecimals(2)
-        self.electricity_input.setValue(self._settings.electricity_rate)
-
         self.power_input = QDoubleSpinBox(self)
         self.power_input.setRange(0, 10_000)
         self.power_input.setSuffix(" W")
         self.power_input.setDecimals(0)
-        self.power_input.setValue(self._settings.power_watts)
+        self.power_input.setValue(0.0)
 
-        self.printer_hourly_input = QDoubleSpinBox(self)
-        self.printer_hourly_input.setRange(0, 10_000)
-        self.printer_hourly_input.setPrefix("R ")
-        self.printer_hourly_input.setSuffix(" / h")
-        self.printer_hourly_input.setDecimals(2)
-        self.printer_hourly_input.setValue(self._settings.printer_hourly_cost)
+        self.labour_minutes_input = QDoubleSpinBox(self)
+        self.labour_minutes_input.setRange(0, 100_000)
+        self.labour_minutes_input.setSuffix(" min")
+        self.labour_minutes_input.setDecimals(0)
+        self.labour_minutes_input.setValue(0.0)
+
+        self.consumables_input = QDoubleSpinBox(self)
+        self.consumables_input.setRange(0, 100_000)
+        self.consumables_input.setPrefix("R ")
+        self.consumables_input.setDecimals(2)
+        self.consumables_input.setValue(0.0)
+
+        self.overhead_input = QDoubleSpinBox(self)
+        self.overhead_input.setRange(0, 100_000)
+        self.overhead_input.setPrefix("R ")
+        self.overhead_input.setDecimals(2)
+        self.overhead_input.setValue(0.0)
+
+        self.failure_pct_input = QDoubleSpinBox(self)
+        self.failure_pct_input.setRange(0, 1000)
+        self.failure_pct_input.setSuffix(" %")
+        self.failure_pct_input.setDecimals(2)
+        self.failure_pct_input.setValue(0.0)
 
         self.margin_input = QDoubleSpinBox(self)
         self.margin_input.setRange(0, 1000)
         self.margin_input.setSuffix(" %")
-        self.margin_input.setDecimals(0)
-        self.margin_input.setValue(self._settings.profit_margin_pct)
+        self.margin_input.setDecimals(2)
+        self.margin_input.setValue(0.0)
 
         self.notes_input = QPlainTextEdit(self)
         self.notes_input.setPlaceholderText("Notes (optional)")
         self.notes_input.setFixedHeight(60)
 
         form.addRow("Filament SKU", self.sku_combo)
+        form.addRow("Printer", self.printer_combo)
         form.addRow("Grams used", self.grams_input)
         form.addRow("Print hours", self.hours_input)
-        form.addRow("Spool size", self.spool_size_input)
-        form.addRow("Spool price", self.spool_price_input)
-        form.addRow("Electricity rate", self.electricity_input)
         form.addRow("Printer power", self.power_input)
-        form.addRow("Printer hourly", self.printer_hourly_input)
+        form.addRow("Labour time", self.labour_minutes_input)
+        form.addRow("Consumables", self.consumables_input)
+        form.addRow("Overhead", self.overhead_input)
+        form.addRow("Failure allowance", self.failure_pct_input)
         form.addRow("Profit margin", self.margin_input)
         form.addRow("Notes", self.notes_input)
 
@@ -127,14 +162,24 @@ class ManualForm(QWidget):
         heading.setProperty("heading", True)
         panel.addWidget(heading)
 
+        self.quote_error_label = QLabel("", self)
+        self.quote_error_label.setProperty("error", True)
+        self.quote_error_label.setWordWrap(True)
+        panel.addWidget(self.quote_error_label)
+
         self._cost_labels: dict[str, QLabel] = {}
         for key, label in [
             ("filament_cost", "Filament cost"),
             ("electricity_cost", "Electricity"),
             ("printer_usage_cost", "Printer usage"),
-            ("total_cost", "Total cost"),
+            ("labour_cost", "Labour"),
+            ("direct_cost", "Direct cost"),
+            ("failure_allowance", "Failure allowance"),
+            ("true_cost", "True cost"),
             ("profit", "Profit"),
-            ("selling_price", "Selling price"),
+            ("price_ex_vat", "Selling price (ex VAT)"),
+            ("vat_amount", "VAT"),
+            ("price_incl_vat", "Price incl. VAT"),
         ]:
             row = QHBoxLayout()
             lbl = QLabel(label, self)
@@ -165,88 +210,209 @@ class ManualForm(QWidget):
         panel_widget.setLayout(panel)
         outer.addWidget(panel_widget, stretch=2)
 
+        # Debounce: restart on every relevant change, fire once input settles.
+        self._quote_timer = QTimer(self)
+        self._quote_timer.setSingleShot(True)
+        self._quote_timer.setInterval(QUOTE_DEBOUNCE_MS)
+        self._quote_timer.timeout.connect(self._fire_quote)
+
     def _connect_change_signals(self) -> None:
         for w in (
-            self.grams_input, self.hours_input, self.spool_size_input,
-            self.spool_price_input, self.electricity_input, self.power_input,
-            self.printer_hourly_input, self.margin_input,
+            self.grams_input, self.hours_input, self.power_input,
+            self.labour_minutes_input, self.consumables_input,
+            self.overhead_input, self.failure_pct_input, self.margin_input,
         ):
-            w.valueChanged.connect(self._update_costs)
-        self.sku_combo.currentIndexChanged.connect(self._on_sku_changed)
+            w.valueChanged.connect(self._schedule_quote)
+        self.sku_combo.currentIndexChanged.connect(self._schedule_quote)
+        self.printer_combo.currentIndexChanged.connect(self._on_printer_changed)
 
     # ── Public API ───────────────────────────────────────────────────────────
 
     def set_skus(self, skus: list[FilamentSku]) -> None:
         self._skus = skus
+        current = self.sku_combo.currentData()
         self.sku_combo.blockSignals(True)
         self.sku_combo.clear()
-        self.sku_combo.addItem("(no SKU — enter price manually)", userData=None)
+        self.sku_combo.addItem("(select a filament SKU)", userData=None)
         for sku in skus:
             label = f"{sku.name}"
             if sku.color:
                 label += f" — {sku.color}"
             # Available grams, not on-hand: filament already reserved for a
-            # queued job cannot be promised to this one. Showing it here is the
-            # difference between picking a spool and discovering at print time
-            # that it is spoken for.
+            # queued job cannot be promised to this one.
             label += f"  ({sku.grams_remaining:.0f}g free)"
             self.sku_combo.addItem(label, userData=sku.id)
+        idx = self.sku_combo.findData(current) if current is not None else -1
+        self.sku_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.sku_combo.blockSignals(False)
+        # Signals were blocked for the rebuild itself, so if the previously
+        # selected SKU is no longer in the new list (archived/deleted — the
+        # backend is LAN-shared and no-auth, so another client can do this
+        # mid-session), the combo silently falls back to the placeholder
+        # with no currentIndexChanged firing. Left alone, _last_quote would
+        # keep referencing a SKU that's no longer selected, and Save would
+        # stay enabled for a payload with filament_sku_id=None.
+        if self.sku_combo.currentData() != current:
+            self._schedule_quote()
+
+    def set_printers(self, printers: list[Printer]) -> None:
+        self._printers = printers
+        current = self.printer_combo.currentData()
+        self.printer_combo.blockSignals(True)
+        self.printer_combo.clear()
+        self.printer_combo.addItem("(select a printer)", userData=None)
+        for p in printers:
+            self.printer_combo.addItem(p.name, userData=p.id)
+        idx = self.printer_combo.findData(current) if current is not None else -1
+        self.printer_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.printer_combo.blockSignals(False)
+        # Same reasoning as set_skus above — route through _on_printer_changed
+        # (not just _schedule_quote) so a genuine selection change also
+        # re-syncs power_input the same way a user-driven change would.
+        if self.printer_combo.currentData() != current:
+            self._on_printer_changed(self.printer_combo.currentIndex())
+
+    def set_app_settings(self, s: AppSettings) -> None:
+        # Prefill defaults ONCE, on first load only. A later call (e.g. after
+        # the user saves new rates in the Settings tab) still needs to update
+        # self._app_settings for labour_rate/vat_pct lookups at Save time —
+        # it just must not stomp values the user may be mid-edit on here.
+        self._app_settings = s
+        if not self._app_settings_applied:
+            self._app_settings_applied = True
+            self.failure_pct_input.blockSignals(True)
+            self.failure_pct_input.setValue(s.default_failure_pct)
+            self.failure_pct_input.blockSignals(False)
+            self.margin_input.blockSignals(True)
+            self.margin_input.setValue(s.default_margin_pct)
+            self.margin_input.blockSignals(False)
+
+    def set_quote_result(self, seq: int, result: QuoteResult) -> None:
+        if seq != self._quote_seq:
+            return  # superseded by a later request; this response is stale
+        self._last_quote = result
+        self._last_quote_labour_rate = self._pending_labour_rate
+        self.quote_error_label.setText("")
+        display = {
+            "filament_cost": result.filament_cost,
+            "electricity_cost": result.electricity_cost,
+            "printer_usage_cost": result.depreciation_cost,
+            "labour_cost": result.labour_cost,
+            "direct_cost": result.direct_cost,
+            "failure_allowance": result.failure_allowance,
+            "true_cost": result.true_cost,
+            "profit": result.profit,
+            "price_ex_vat": result.price_ex_vat,
+            "vat_amount": result.vat_amount,
+            "price_incl_vat": result.price_incl_vat,
+        }
+        for k, v in display.items():
+            self._cost_labels[k].setText(f"R {v:.2f}")
+        self._update_save_enabled()
+
+    def set_quote_error(self, seq: int, message: str) -> None:
+        if seq != self._quote_seq:
+            return  # superseded by a later request; this response is stale
+        self._last_quote = None
+        self.quote_error_label.setText(message)
+        self._clear_cost_labels()
+        self._update_save_enabled()
 
     # ── Internals ────────────────────────────────────────────────────────────
 
-    def _on_sku_changed(self, _idx: int) -> None:
-        sku_id = self.sku_combo.currentData()
-        if sku_id is not None:
-            sku = next((s for s in self._skus if s.id == sku_id), None)
-            if sku is not None and sku.cost_per_gram > 0:
-                # Override spool_price input so cost reflects this SKU's WAC
-                price_for_full_spool = sku.cost_per_gram * self.spool_size_input.value()
-                self.spool_price_input.blockSignals(True)
-                self.spool_price_input.setValue(price_for_full_spool)
-                self.spool_price_input.blockSignals(False)
-        self._update_costs()
+    def _on_printer_changed(self, _idx: int) -> None:
+        printer_id = self.printer_combo.currentData()
+        if printer_id is not None:
+            printer = next((p for p in self._printers if p.id == printer_id), None)
+            if printer is not None:
+                self.power_input.blockSignals(True)
+                self.power_input.setValue(printer.power_watts_default)
+                self.power_input.blockSignals(False)
+        self._schedule_quote()
 
-    def _update_costs(self) -> None:
-        try:
-            r = calculate_costs(
-                filament_size=self.spool_size_input.value(),
-                filament_price=self.spool_price_input.value(),
-                filament_used=self.grams_input.value(),
-                total_print_hours=self.hours_input.value(),
-                electricity_rate=self.electricity_input.value(),
-                power_watts=self.power_input.value(),
-                printer_hourly_cost=self.printer_hourly_input.value(),
-                profit_margin_pct=self.margin_input.value(),
-            )
-        except ValueError:
+    def _clear_cost_labels(self) -> None:
+        for lbl in self._cost_labels.values():
+            lbl.setText("R 0.00")
+
+    def _update_save_enabled(self) -> None:
+        enabled = self._last_quote is not None
+        self.save_btn.setEnabled(enabled)
+        self.draft_btn.setEnabled(enabled)
+
+    def _current_quote_params(self) -> dict | None:
+        sku_id = self.sku_combo.currentData()
+        printer_id = self.printer_combo.currentData()
+        grams = self.grams_input.value()
+        hours = self.hours_input.value()
+        if sku_id is None or printer_id is None or grams <= 0 or hours <= 0:
+            return None
+        return {
+            "sku_id": sku_id,
+            "grams": grams,
+            "printer_id": printer_id,
+            "print_hours": hours,
+            "power_watts": self.power_input.value() or None,
+            "labour_minutes": self.labour_minutes_input.value(),
+            "consumables_cost": self.consumables_input.value(),
+            "overhead_cost": self.overhead_input.value(),
+            "failure_pct": self.failure_pct_input.value(),
+            "margin_pct": self.margin_input.value(),
+        }
+
+    def _schedule_quote(self, *_args) -> None:
+        # Bump the seq HERE, not in _fire_quote: a request already in flight
+        # for the pre-edit input must be recognisable as stale the instant
+        # this edit happens, even if its response arrives before the next
+        # debounced request is actually sent (still inside the debounce
+        # window). Bumping only when the next request fires would leave that
+        # arrival window where an old response still matches the "current"
+        # seq and gets applied against inputs it was never quoted for.
+        self._quote_seq += 1
+        self._last_quote = None
+        self._update_save_enabled()
+        self._quote_timer.start()
+
+    def _fire_quote(self) -> None:
+        params = self._current_quote_params()
+        if params is None:
+            self.quote_error_label.setText("")
+            self._clear_cost_labels()
             return
-        for k, v in r.items():
-            if k in self._cost_labels:
-                self._cost_labels[k].setText(f"R {v:.2f}")
+        # Freeze the rate this request will actually be priced with, not
+        # whatever self._app_settings might evolve into before the response
+        # lands (see the field's own comment in __init__).
+        self._pending_labour_rate = (
+            self._app_settings.labour_rate_per_hour if self._app_settings else None
+        )
+        self.quote_requested.emit(self._quote_seq, params)
 
     def _build_payload(self) -> JobPayload:
-        r = calculate_costs(
-            filament_size=self.spool_size_input.value(),
-            filament_price=self.spool_price_input.value(),
-            filament_used=self.grams_input.value(),
-            total_print_hours=self.hours_input.value(),
-            electricity_rate=self.electricity_input.value(),
-            power_watts=self.power_input.value(),
-            printer_hourly_cost=self.printer_hourly_input.value(),
-            profit_margin_pct=self.margin_input.value(),
-        )
+        q = self._last_quote
+        if q is None:
+            raise RuntimeError("_build_payload called with no quote on hand")
+        material = q.material_lines[0]
         return JobPayload(
-            filament_sku_id=self.sku_combo.currentData() or 0,
+            filament_sku_id=self.sku_combo.currentData(),
+            printer_id=self.printer_combo.currentData(),
             slicer_grams=self.grams_input.value(),
             slicer_seconds=int(self.hours_input.value() * 3600),
-            filament_size=self.spool_size_input.value(),
-            filament_price=self.spool_price_input.value(),
-            electricity_rate=self.electricity_input.value(),
-            power_watts=self.power_input.value(),
-            printer_hourly_cost=self.printer_hourly_input.value(),
-            profit_margin_pct=self.margin_input.value(),
-            **r,
+            filament_price=material.cost_per_g,
+            filament_cost=q.filament_cost,
+            electricity_cost=q.electricity_cost,
+            printer_usage_cost=q.depreciation_cost,
+            power_watts=q.power_watts,
+            labour_minutes=self.labour_minutes_input.value(),
+            labour_rate=self._last_quote_labour_rate,
+            consumables_cost=self.consumables_input.value(),
+            overhead_cost=self.overhead_input.value(),
+            failure_pct=q.failure_pct,
+            direct_cost=q.direct_cost,
+            total_cost=q.true_cost,
+            profit=q.profit,
+            selling_price=q.price_ex_vat,
+            vat_pct=q.vat_pct,
+            price_incl_vat=q.price_incl_vat,
+            pricing_mode=q.pricing_mode,
             notes=self.notes_input.toPlainText().strip() or None,
         )
 
