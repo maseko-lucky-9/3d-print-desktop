@@ -7,7 +7,17 @@ a debounced `POST /api/quote` round trip — every price line is server-computed
 free-form "no SKU, enter price manually" escape hatch is gone: the engine
 always prices off a real SKU's FIFO/weighted-average cost and a real
 printer's purchase price / expected life hours, never a client-guessed rate.
+
+Phase 6 adds two more states MainWindow can push in: an OFFLINE quote (the
+server is unreachable but a cached rate context lets services/cost.py
+compute the same breakdown locally — informational only, Save stays
+disabled) and a DRIFT warning (the server answered, but MainWindow's own
+local recomputation of the same inputs disagreed with it by more than a
+cent — Save stays enabled, since the numbers on screen are still the
+server's authoritative ones; the badge is a signal to a human, not a block).
 """
+
+from datetime import datetime
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
@@ -29,8 +39,16 @@ from print_desktop.models.print_request import (
     Printer,
     QuoteResult,
 )
+from print_desktop.services.cost import QuoteBreakdown
 
 QUOTE_DEBOUNCE_MS = 400
+
+
+def _format_cached_at(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso).strftime("%b %d, %H:%M")
+    except ValueError:
+        return iso
 
 
 class ManualForm(QWidget):
@@ -167,6 +185,14 @@ class ManualForm(QWidget):
         self.quote_error_label.setWordWrap(True)
         panel.addWidget(self.quote_error_label)
 
+        # Offline / drift badge (Phase 6) — mutually exclusive with each
+        # other and with quote_error_label (a hard error means neither an
+        # offline fallback nor a server response exists to compare/show).
+        self.quote_status_label = QLabel("", self)
+        self.quote_status_label.setProperty("muted", True)
+        self.quote_status_label.setWordWrap(True)
+        panel.addWidget(self.quote_status_label)
+
         self._cost_labels: dict[str, QLabel] = {}
         for key, label in [
             ("filament_cost", "Filament cost"),
@@ -287,7 +313,7 @@ class ManualForm(QWidget):
             self.margin_input.setValue(s.default_margin_pct)
             self.margin_input.blockSignals(False)
 
-    def set_quote_result(self, seq: int, result: QuoteResult) -> None:
+    def set_quote_result(self, seq: int, result: QuoteResult, drift: str | None = None) -> None:
         if seq != self._quote_seq:
             return  # superseded by a later request; this response is stale
         self._last_quote = result
@@ -308,6 +334,41 @@ class ManualForm(QWidget):
         }
         for k, v in display.items():
             self._cost_labels[k].setText(f"R {v:.2f}")
+        if drift:
+            # Save stays enabled: the numbers on screen and about to be
+            # submitted are still the server's authoritative ones. This is a
+            # signal that two independent money formulas disagree, not a
+            # reason to block a user who did nothing wrong.
+            self._set_quote_status(
+                f"⚠ Local calculation disagrees with the server ({drift})", "warning"
+            )
+        else:
+            self._set_quote_status("", "muted")
+        self._update_save_enabled()
+
+    def set_offline_quote_result(self, seq: int, breakdown: QuoteBreakdown, cached_at: str) -> None:
+        if seq != self._quote_seq:
+            return  # superseded by a later request; this response is stale
+        self._last_quote = None  # offline numbers are never submittable
+        self.quote_error_label.setText("")
+        display = {
+            "filament_cost": breakdown.filament_cost,
+            "electricity_cost": breakdown.electricity_cost,
+            "printer_usage_cost": breakdown.depreciation_cost,
+            "labour_cost": breakdown.labour_cost,
+            "direct_cost": breakdown.direct_cost,
+            "failure_allowance": breakdown.failure_allowance,
+            "true_cost": breakdown.true_cost,
+            "profit": breakdown.profit,
+            "price_ex_vat": breakdown.price_ex_vat,
+            "vat_amount": breakdown.vat_amount,
+            "price_incl_vat": breakdown.price_incl_vat,
+        }
+        for k, v in display.items():
+            self._cost_labels[k].setText(f"R {v:.2f}")
+        self._set_quote_status(
+            f"Offline — rates as of {_format_cached_at(cached_at)}. Reconnect to save.", "muted"
+        )
         self._update_save_enabled()
 
     def set_quote_error(self, seq: int, message: str) -> None:
@@ -315,10 +376,18 @@ class ManualForm(QWidget):
             return  # superseded by a later request; this response is stale
         self._last_quote = None
         self.quote_error_label.setText(message)
+        self._set_quote_status("", "muted")
         self._clear_cost_labels()
         self._update_save_enabled()
 
     # ── Internals ────────────────────────────────────────────────────────────
+
+    def _set_quote_status(self, text: str, style: str) -> None:
+        self.quote_status_label.setText(text)
+        self.quote_status_label.setProperty("muted", style == "muted")
+        self.quote_status_label.setProperty("warning", style == "warning")
+        self.quote_status_label.style().unpolish(self.quote_status_label)
+        self.quote_status_label.style().polish(self.quote_status_label)
 
     def _on_printer_changed(self, _idx: int) -> None:
         printer_id = self.printer_combo.currentData()
@@ -369,6 +438,11 @@ class ManualForm(QWidget):
         # seq and gets applied against inputs it was never quoted for.
         self._quote_seq += 1
         self._last_quote = None
+        # A drift/offline badge from the previous quote is now describing
+        # inputs the user has already changed — leaving it up for the
+        # ~400ms debounce window (plus network latency) would show a stale
+        # banner more prominently than a stale number alone ever was.
+        self._set_quote_status("", "muted")
         self._update_save_enabled()
         self._quote_timer.start()
 
@@ -376,6 +450,7 @@ class ManualForm(QWidget):
         params = self._current_quote_params()
         if params is None:
             self.quote_error_label.setText("")
+            self._set_quote_status("", "muted")
             self._clear_cost_labels()
             return
         # Freeze the rate this request will actually be priced with, not

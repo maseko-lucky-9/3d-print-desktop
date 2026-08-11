@@ -5,12 +5,12 @@ breaking changes; provide migration in this module.
 """
 
 import tomllib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import tomli_w
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 SETTINGS_DIR = Path.home() / "Library" / "Application Support" / "PrintDesktop"
 SETTINGS_PATH = SETTINGS_DIR / "settings.toml"
 
@@ -28,6 +28,25 @@ class Settings:
 
     # Onboarding
     onboarded: bool = False
+
+    # Phase 6 of the costing-engine plan: the last-good pricing context,
+    # cached here purely for offline quoting (MainWindow._try_offline_quote)
+    # — never read to prefill any Settings-tab or ManualForm input, and
+    # never written except right after a real GET /api/settings /
+    # GET /api/printers / GET /api/filaments/skus succeeds. cached_at empty
+    # means "never successfully cached" — offline quoting is refused in that
+    # case rather than guessing from the dataclass's own bare defaults below.
+    cached_at: str = ""  # ISO timestamp of the cache write
+    cached_pricing_mode: str = ""
+    cached_default_margin_pct: float = 0.0
+    cached_vat_pct: float = 0.0
+    cached_labour_rate_per_hour: float = 0.0
+    cached_electricity_tariff_per_kwh: float = 0.0
+    cached_default_failure_pct: float = 0.0
+    # [{id, name, power_watts_default, purchase_price, expected_life_hours}]
+    cached_printers: list = field(default_factory=list)
+    # [{id, name, color, cost_per_gram}]
+    cached_skus: list = field(default_factory=list)
 
 
 def load() -> Settings:
@@ -61,6 +80,9 @@ def _migrate_and_construct(raw: dict) -> Settings:
     itself: the existing known-fields filter below already drops any key
     that isn't a current dataclass field, which is exactly what a v1 TOML
     file full of now-obsolete rate keys needs to happen to it.
+    v3 (Phase 6): added cached_* fields for offline quoting. Also purely
+    additive — a v2 file simply lacks these keys, and the dataclass defaults
+    (all empty/zero) correctly read as "nothing cached yet."
     """
     raw.setdefault("schema_version", 1)
     # Drop unknown fields to stay forward-compatible.

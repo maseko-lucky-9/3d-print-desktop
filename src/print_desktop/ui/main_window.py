@@ -6,6 +6,7 @@ every 5 s for live tab counters per plan §17 N5.
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QTimer
@@ -13,8 +14,10 @@ from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabWidget
 
 from print_desktop import __version__
-from print_desktop.models.print_request import JobPayload
+from print_desktop.models.print_request import JobPayload, Printer
 from print_desktop.services.api_client import ApiClient, wait_for_makerworld
+from print_desktop.services.drift import build_local_recompute, find_drift
+from print_desktop.services.offline import build_offline_quote
 from print_desktop.storage.settings import Settings
 from print_desktop.storage.settings import save as save_settings
 from print_desktop.ui.home import HomeView
@@ -30,6 +33,15 @@ class MainWindow(QMainWindow):
         self.resize(1100, 800)
         self._settings = settings
         self._client = ApiClient(settings.backend_url, ca_path=ca_path)
+        # Retained purely so _detect_drift can look a printer's rates up by
+        # id without a network round trip. Refreshed on every 5s poll tick
+        # (_refresh_pricing_cache_quietly), not just at startup — a printer
+        # edited from another LAN client mid-session (the backend is
+        # intentionally no-auth and shared) would otherwise leave this
+        # permanently stale, and _detect_drift would then report false
+        # "drift" against a price that changed for a real reason, not a
+        # formula bug.
+        self._printers: list[Printer] = []
 
         self.home = HomeView(self)
         self.settings_view = SettingsView(self)
@@ -49,12 +61,16 @@ class MainWindow(QMainWindow):
         self._build_menu_bar()
         self._restore_window_state()
 
-        # Initial load + 5s poll for jobs/SKUs. Pricing context (settings +
-        # printers) is loaded once at startup only, deliberately NOT on the
-        # 5s poll — a live app has no concurrent editors, and re-pushing
-        # server values into the Settings tab every 5s would stomp whatever
-        # the user is mid-typing there. It's refreshed again after a
-        # successful save instead (see _save_settings_async/_save_printer_async).
+        # Initial load + 5s poll for jobs/SKUs. _refresh_async's poll tick
+        # ALSO quietly re-fetches settings/printers to keep self._printers
+        # and the drift/offline rate cache fresh (see
+        # _refresh_pricing_cache_quietly) — but never pushes those into the
+        # Settings tab or ManualForm's editable widgets on that cadence,
+        # since a live app has no concurrent editors and re-pushing server
+        # values into those inputs every 5s would stomp whatever the user is
+        # mid-typing there. The widget-facing push happens once at startup
+        # (_load_pricing_context) and again after a successful save (see
+        # _save_settings_async/_save_printer_async).
         QTimer.singleShot(0, self._refresh)
         QTimer.singleShot(0, self._load_pricing_context)
         self._poll_timer = QTimer(self)
@@ -129,6 +145,28 @@ class MainWindow(QMainWindow):
         self.statusBar().clearMessage()
         self.home.set_skus(skus)
         self.home.set_jobs(jobs)
+        self._update_sku_cache(skus)
+        await self._refresh_pricing_cache_quietly()
+        save_settings(self._settings)  # one write per tick, not one per helper
+
+    async def _refresh_pricing_cache_quietly(self) -> None:
+        """Keeps self._printers and the cached settings rates fresh on the
+        existing 5s poll tick — WITHOUT pushing into SettingsView/ManualForm's
+        editable widgets, which is what _load_pricing_context_async is for
+        and why that one stays startup/save-triggered only. Skipping this
+        would leave _detect_drift comparing against whatever printer prices
+        were true when the app launched: another LAN client editing a
+        printer's price mid-session (the backend is intentionally no-auth
+        and shared) would then make every subsequent quote against that
+        printer look like formula drift, when nothing is actually wrong."""
+        try:
+            app_settings = await self._client.get_settings()
+            printers = await self._client.list_printers(status="active")
+        except Exception as exc:
+            log.debug("Quiet pricing-cache refresh failed: %s", exc)
+            return
+        self._printers = printers
+        self._update_pricing_cache(app_settings, printers)
 
     def _load_pricing_context(self) -> None:
         asyncio.ensure_future(self._load_pricing_context_async())
@@ -141,10 +179,88 @@ class MainWindow(QMainWindow):
             log.warning("Loading pricing context failed: %s", exc)
             self.statusBar().showMessage(f"Could not load pricing settings: {exc}", 6000)
             return
+        self._printers = printers
         self.home.set_app_settings(app_settings)
         self.home.set_printers(printers)
         self.settings_view.set_settings(app_settings)
         self.settings_view.set_printers(printers)
+        self._update_pricing_cache(app_settings, printers)
+        save_settings(self._settings)
+
+    # ── Offline cache (Phase 6 of the costing-engine plan) ─────────────────
+    #
+    # Pure mutators of self._settings — never touch disk themselves. Every
+    # call site persists once, explicitly, after whichever of these it
+    # calls, so a tick that updates both SKUs and pricing context (the 5s
+    # poll) writes the TOML file once, not twice. Read only by
+    # _try_offline_quote/_detect_drift below; never used to prefill a
+    # Settings-tab or ManualForm input (those come from the live server
+    # response every time one succeeds).
+
+    def _update_pricing_cache(self, s, printers: list[Printer]) -> None:
+        self._settings.cached_pricing_mode = s.pricing_mode
+        self._settings.cached_default_margin_pct = s.default_margin_pct
+        self._settings.cached_vat_pct = s.vat_pct
+        self._settings.cached_labour_rate_per_hour = s.labour_rate_per_hour
+        self._settings.cached_electricity_tariff_per_kwh = s.electricity_tariff_per_kwh
+        self._settings.cached_default_failure_pct = s.default_failure_pct
+        self._update_printer_cache(printers)  # also stamps cached_at
+
+    def _update_printer_cache(self, printers: list[Printer]) -> None:
+        self._settings.cached_printers = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "power_watts_default": p.power_watts_default,
+                "purchase_price": p.purchase_price,
+                "expected_life_hours": p.expected_life_hours,
+            }
+            for p in printers
+        ]
+        self._settings.cached_at = datetime.now(UTC).isoformat()
+
+    def _update_sku_cache(self, skus) -> None:
+        self._settings.cached_skus = [
+            {"id": s.id, "name": s.name, "color": s.color, "cost_per_gram": s.cost_per_gram}
+            for s in skus
+        ]
+        # cached_at is the pricing-context timestamp, not a per-field one —
+        # SKU prices move independently of settings/printers, but a single
+        # "rates as of <date>" badge is what the plan actually asks for, and
+        # a SKU refresh alone (no settings/printers change) still counts as
+        # "we successfully talked to the server just now".
+        self._settings.cached_at = datetime.now(UTC).isoformat()
+
+    def _try_offline_quote(self, params: dict):
+        if not self._settings.cached_at:
+            return None  # never successfully cached anything to fall back to
+        return build_offline_quote(
+            params,
+            self._settings.cached_skus,
+            self._settings.cached_printers,
+            self._settings.cached_electricity_tariff_per_kwh,
+            self._settings.cached_labour_rate_per_hour,
+            self._settings.cached_pricing_mode,
+            self._settings.cached_vat_pct,
+        )
+
+    def _detect_drift(self, result, params: dict) -> str | None:
+        printer = next((p for p in self._printers if p.id == params["printer_id"]), None)
+        if printer is None:
+            return None  # can't recompute depreciation without the printer's rates
+        local = build_local_recompute(
+            result,
+            params,
+            printer,
+            self._settings.cached_electricity_tariff_per_kwh,
+            self._settings.cached_labour_rate_per_hour,
+        )
+        if local is None:
+            return None
+        drift = find_drift(result, local)
+        if drift:
+            log.warning("Local/server quote drift detected: %s", drift)
+        return drift
 
     def _on_quote_requested(self, seq: int, params: dict) -> None:
         asyncio.ensure_future(self._quote_async(seq, params))
@@ -153,9 +269,14 @@ class MainWindow(QMainWindow):
         try:
             result = await self._client.quote(**params)
         except Exception as exc:
-            self.home.set_quote_error(seq, str(exc))
+            offline = self._try_offline_quote(params)
+            if offline is not None:
+                self.home.set_offline_quote_result(seq, offline, self._settings.cached_at)
+            else:
+                self.home.set_quote_error(seq, str(exc))
             return
-        self.home.set_quote_result(seq, result)
+        drift = self._detect_drift(result, params)
+        self.home.set_quote_result(seq, result, drift)
 
     def _on_save_settings_requested(self, fields: dict) -> None:
         asyncio.ensure_future(self._save_settings_async(fields))
@@ -171,6 +292,8 @@ class MainWindow(QMainWindow):
         # payload, but must not have its own in-progress margin/failure %
         # inputs reset by this — set_app_settings only prefills once, ever.
         self.home.set_app_settings(updated)
+        self._update_pricing_cache(updated, self._printers)
+        save_settings(self._settings)
 
     def _on_save_printer_requested(self, printer_id: int, fields: dict) -> None:
         asyncio.ensure_future(self._save_printer_async(printer_id, fields))
@@ -186,9 +309,12 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.settings_view.set_printers_status(f"Saved, but refresh failed: {exc}")
             return
+        self._printers = printers
         self.settings_view.set_printers(printers)
         self.settings_view.set_printers_status("Saved.")
         self.home.set_printers(printers)
+        self._update_printer_cache(printers)
+        save_settings(self._settings)
 
     def _on_submit_job(self, payload: JobPayload, send_to_printer: bool) -> None:
         asyncio.ensure_future(self._submit_async(payload, send_to_printer))
