@@ -10,11 +10,14 @@ from pathlib import Path
 import httpx
 
 from print_desktop.models.print_request import (
+    AppSettings,
     FilamentSku,
     JobPayload,
     MakerWorldImport,
+    Printer,
     PrinterStatus,
     PrintJob,
+    QuoteResult,
 )
 
 
@@ -79,6 +82,93 @@ class ApiClient:
         r = await self._client.get("/api/printer/status")
         r.raise_for_status()
         return PrinterStatus.model_validate(r.json())
+
+    async def get_settings(self) -> AppSettings:
+        r = await self._client.get("/api/settings")
+        r.raise_for_status()
+        return AppSettings.model_validate(r.json())
+
+    async def update_settings(
+        self,
+        *,
+        electricity_tariff_per_kwh: float,
+        vat_pct: float,
+        labour_rate_per_hour: float,
+        pricing_mode: str,
+        default_margin_pct: float,
+        default_failure_pct: float,
+        currency: str,
+    ) -> AppSettings:
+        # PUT is a full replace — every field is required server-side, so
+        # there is no partial-update variant to offer here.
+        r = await self._client.put(
+            "/api/settings",
+            json={
+                "electricity_tariff_per_kwh": electricity_tariff_per_kwh,
+                "vat_pct": vat_pct,
+                "labour_rate_per_hour": labour_rate_per_hour,
+                "pricing_mode": pricing_mode,
+                "default_margin_pct": default_margin_pct,
+                "default_failure_pct": default_failure_pct,
+                "currency": currency,
+            },
+        )
+        r.raise_for_status()
+        return AppSettings.model_validate(r.json())
+
+    async def list_printers(self, status: str | None = None) -> list[Printer]:
+        params = {"status": status} if status is not None else None
+        r = await self._client.get("/api/printers", params=params)
+        r.raise_for_status()
+        return [Printer.model_validate(x) for x in r.json()]
+
+    async def update_printer(
+        self,
+        printer_id: int,
+        *,
+        purchase_price: float | None = None,
+        expected_life_hours: float | None = None,
+    ) -> Printer:
+        body = {}
+        if purchase_price is not None:
+            body["purchase_price"] = purchase_price
+        if expected_life_hours is not None:
+            body["expected_life_hours"] = expected_life_hours
+        r = await self._client.patch(f"/api/printers/{printer_id}", json=body)
+        r.raise_for_status()
+        return Printer.model_validate(r.json())
+
+    async def quote(
+        self,
+        *,
+        sku_id: int,
+        grams: float,
+        printer_id: int,
+        print_hours: float,
+        power_watts: float | None = None,
+        labour_minutes: float = 0,
+        consumables_cost: float = 0,
+        overhead_cost: float = 0,
+        failure_pct: float | None = None,
+        margin_pct: float | None = None,
+    ) -> QuoteResult:
+        body: dict = {
+            "materials": [{"sku_id": sku_id, "grams": grams}],
+            "printer_id": printer_id,
+            "print_hours": print_hours,
+            "labour_minutes": labour_minutes,
+            "consumables_cost": consumables_cost,
+            "overhead_cost": overhead_cost,
+        }
+        if power_watts is not None:
+            body["power_watts"] = power_watts
+        if failure_pct is not None:
+            body["failure_pct"] = failure_pct
+        if margin_pct is not None:
+            body["margin_pct"] = margin_pct
+        r = await self._client.post("/api/quote", json=body)
+        r.raise_for_status()
+        return QuoteResult.model_validate(r.json())
 
     async def import_makerworld(self, url: str) -> MakerWorldImport:
         r = await self._client.post("/api/makerworld/import", json={"url": url})

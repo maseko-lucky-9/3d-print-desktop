@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QTimer
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabWidget
 
 from print_desktop import __version__
 from print_desktop.models.print_request import JobPayload
@@ -18,6 +18,7 @@ from print_desktop.services.api_client import ApiClient, wait_for_makerworld
 from print_desktop.storage.settings import Settings
 from print_desktop.storage.settings import save as save_settings
 from print_desktop.ui.home import HomeView
+from print_desktop.ui.settings_view import SettingsView
 
 log = logging.getLogger(__name__)
 
@@ -30,18 +31,32 @@ class MainWindow(QMainWindow):
         self._settings = settings
         self._client = ApiClient(settings.backend_url, ca_path=ca_path)
 
-        self.home = HomeView(settings, self)
-        self.setCentralWidget(self.home)
+        self.home = HomeView(self)
+        self.settings_view = SettingsView(self)
+
+        tabs = QTabWidget(self)
+        tabs.addTab(self.home, "Jobs")
+        tabs.addTab(self.settings_view, "Settings")
+        self.setCentralWidget(tabs)
 
         self.home.submit_job.connect(self._on_submit_job)
         self.home.import_makerworld_url.connect(self._on_import_makerworld)
         self.home.feature_clicked.connect(self._on_feature_clicked)
+        self.home.quote_requested.connect(self._on_quote_requested)
+        self.settings_view.save_settings_requested.connect(self._on_save_settings_requested)
+        self.settings_view.save_printer_requested.connect(self._on_save_printer_requested)
 
         self._build_menu_bar()
         self._restore_window_state()
 
-        # Initial load + 5s poll
+        # Initial load + 5s poll for jobs/SKUs. Pricing context (settings +
+        # printers) is loaded once at startup only, deliberately NOT on the
+        # 5s poll — a live app has no concurrent editors, and re-pushing
+        # server values into the Settings tab every 5s would stomp whatever
+        # the user is mid-typing there. It's refreshed again after a
+        # successful save instead (see _save_settings_async/_save_printer_async).
         QTimer.singleShot(0, self._refresh)
+        QTimer.singleShot(0, self._load_pricing_context)
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._refresh)
         self._poll_timer.start(5000)
@@ -102,10 +117,78 @@ class MainWindow(QMainWindow):
             skus = await self._client.list_filament_skus()
             jobs = await self._client.list_jobs()
         except Exception as exc:
+            # Previously log-only — the SKU dropdown went silently empty for
+            # months because nothing surfaced this anywhere a user would see
+            # it. A background 5s poll failing must not pop a modal dialog on
+            # every tick (that would mean one QMessageBox every 5s while the
+            # backend is down), so the status bar is the right amount of
+            # "explicit" here: visible, non-blocking, self-clearing.
             log.warning("Refresh failed: %s", exc)
+            self.statusBar().showMessage(f"Backend unreachable — retrying: {exc}", 6000)
             return
+        self.statusBar().clearMessage()
         self.home.set_skus(skus)
         self.home.set_jobs(jobs)
+
+    def _load_pricing_context(self) -> None:
+        asyncio.ensure_future(self._load_pricing_context_async())
+
+    async def _load_pricing_context_async(self) -> None:
+        try:
+            app_settings = await self._client.get_settings()
+            printers = await self._client.list_printers(status="active")
+        except Exception as exc:
+            log.warning("Loading pricing context failed: %s", exc)
+            self.statusBar().showMessage(f"Could not load pricing settings: {exc}", 6000)
+            return
+        self.home.set_app_settings(app_settings)
+        self.home.set_printers(printers)
+        self.settings_view.set_settings(app_settings)
+        self.settings_view.set_printers(printers)
+
+    def _on_quote_requested(self, seq: int, params: dict) -> None:
+        asyncio.ensure_future(self._quote_async(seq, params))
+
+    async def _quote_async(self, seq: int, params: dict) -> None:
+        try:
+            result = await self._client.quote(**params)
+        except Exception as exc:
+            self.home.set_quote_error(seq, str(exc))
+            return
+        self.home.set_quote_result(seq, result)
+
+    def _on_save_settings_requested(self, fields: dict) -> None:
+        asyncio.ensure_future(self._save_settings_async(fields))
+
+    async def _save_settings_async(self, fields: dict) -> None:
+        try:
+            updated = await self._client.update_settings(**fields)
+        except Exception as exc:
+            self.settings_view.set_settings_status(f"Save failed: {exc}")
+            return
+        self.settings_view.set_settings_status("Saved.")
+        # ManualForm needs the fresh labour_rate_per_hour for its next Save
+        # payload, but must not have its own in-progress margin/failure %
+        # inputs reset by this — set_app_settings only prefills once, ever.
+        self.home.set_app_settings(updated)
+
+    def _on_save_printer_requested(self, printer_id: int, fields: dict) -> None:
+        asyncio.ensure_future(self._save_printer_async(printer_id, fields))
+
+    async def _save_printer_async(self, printer_id: int, fields: dict) -> None:
+        try:
+            await self._client.update_printer(printer_id, **fields)
+        except Exception as exc:
+            self.settings_view.set_printers_status(f"Save failed: {exc}")
+            return
+        try:
+            printers = await self._client.list_printers(status="active")
+        except Exception as exc:
+            self.settings_view.set_printers_status(f"Saved, but refresh failed: {exc}")
+            return
+        self.settings_view.set_printers(printers)
+        self.settings_view.set_printers_status("Saved.")
+        self.home.set_printers(printers)
 
     def _on_submit_job(self, payload: JobPayload, send_to_printer: bool) -> None:
         asyncio.ensure_future(self._submit_async(payload, send_to_printer))

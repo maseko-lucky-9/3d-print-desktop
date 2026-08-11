@@ -18,8 +18,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from print_desktop.models.print_request import FilamentSku, PrintJob
-from print_desktop.storage.settings import Settings
+from print_desktop.models.print_request import (
+    AppSettings,
+    FilamentSku,
+    Printer,
+    PrintJob,
+    QuoteResult,
+)
 from print_desktop.ui.widgets.feature_icons import FeatureIcons
 from print_desktop.ui.widgets.manual_form import ManualForm
 from print_desktop.ui.widgets.project_card import ProjectCard
@@ -36,13 +41,14 @@ class HomeView(QWidget):
     submit_job = Signal(object, bool)  # JobPayload, send_to_printer
     import_makerworld_url = Signal(str)
     feature_clicked = Signal(str)  # slug from FeatureIcons
+    quote_requested = Signal(int, dict)  # seq, kwargs for ApiClient.quote()
 
-    def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._jobs: list[PrintJob] = []
-        self._build_ui(settings)
+        self._build_ui()
 
-    def _build_ui(self, settings: Settings) -> None:
+    def _build_ui(self) -> None:
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
@@ -63,8 +69,9 @@ class HomeView(QWidget):
         layout.addWidget(self.features)
 
         # Manual form + cost panel
-        self.form = ManualForm(settings, content)
+        self.form = ManualForm(content)
         self.form.payload_ready.connect(lambda payload: self.submit_job.emit(payload, True))
+        self.form.quote_requested.connect(self.quote_requested.emit)
         layout.addWidget(self.form)
 
         # Project tabs + grid
@@ -86,6 +93,18 @@ class HomeView(QWidget):
 
     def set_skus(self, skus: list[FilamentSku]) -> None:
         self.form.set_skus(skus)
+
+    def set_printers(self, printers: list[Printer]) -> None:
+        self.form.set_printers(printers)
+
+    def set_app_settings(self, s: AppSettings) -> None:
+        self.form.set_app_settings(s)
+
+    def set_quote_result(self, seq: int, result: QuoteResult) -> None:
+        self.form.set_quote_result(seq, result)
+
+    def set_quote_error(self, seq: int, message: str) -> None:
+        self.form.set_quote_error(seq, message)
 
     def set_jobs(self, jobs: list[PrintJob]) -> None:
         self._jobs = jobs
