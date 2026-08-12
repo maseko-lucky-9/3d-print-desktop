@@ -6,6 +6,8 @@ MainWindow wires up to ApiClient. These tests exercise the widget in
 isolation, driving it exactly the way MainWindow does.
 """
 
+from decimal import Decimal
+
 import pytest
 
 from print_desktop.models.print_request import (
@@ -15,7 +17,27 @@ from print_desktop.models.print_request import (
     QuoteMaterialLine,
     QuoteResult,
 )
+from print_desktop.services.cost import QuoteBreakdown
 from print_desktop.ui.widgets.manual_form import ManualForm
+
+
+def _breakdown(**overrides) -> QuoteBreakdown:
+    base = {
+        "filament_cost": Decimal("57.60"),
+        "electricity_cost": Decimal("3.44"),
+        "depreciation_cost": Decimal("20.10"),
+        "labour_cost": Decimal("50.00"),
+        "direct_cost": Decimal("131.14"),
+        "failure_allowance": Decimal("13.11"),
+        "true_cost": Decimal("144.25"),
+        "price_ex_vat": Decimal("320.56"),
+        "profit": Decimal("176.31"),
+        "margin_pct_actual": Decimal("55.00"),
+        "vat_amount": Decimal("48.08"),
+        "price_incl_vat": Decimal("368.64"),
+    }
+    base.update(overrides)
+    return QuoteBreakdown(**base)
 
 
 def _sku(id_=1, name="PETG Red", grams=500.0, cost=2.5) -> FilamentSku:
@@ -273,3 +295,65 @@ def test_set_app_settings_prefills_defaults_only_once(qtbot, form):
     form.set_app_settings(_app_settings(default_margin_pct=99.0, default_failure_pct=1.0))
 
     assert form.margin_input.value() == 42.0
+
+
+# ── Phase 6: offline fallback + drift badge ─────────────────────────────────
+
+
+def test_offline_quote_result_populates_breakdown_but_leaves_save_disabled(qtbot, form):
+    form.set_skus([_sku()])
+    form.set_printers([_printer()])
+    form.sku_combo.setCurrentIndex(1)
+    form.printer_combo.setCurrentIndex(1)
+
+    form.set_offline_quote_result(form._quote_seq, _breakdown(), "2026-08-10T12:00:00+00:00")
+
+    assert form._cost_labels["true_cost"].text() == "R 144.25"
+    assert form._cost_labels["price_incl_vat"].text() == "R 368.64"
+    assert "Offline" in form.quote_status_label.text()
+    assert "Aug 10" in form.quote_status_label.text()
+    assert not form.save_btn.isEnabled()
+    assert not form.draft_btn.isEnabled()
+    assert form._last_quote is None
+
+
+def test_offline_quote_result_respects_the_seq_guard(qtbot, form):
+    form.set_skus([_sku()])
+    form.set_printers([_printer()])
+    form.sku_combo.setCurrentIndex(1)
+    form.printer_combo.setCurrentIndex(1)
+    stale_seq = form._quote_seq
+    form.grams_input.setValue(50.0)  # bumps _quote_seq past stale_seq
+
+    form.set_offline_quote_result(stale_seq, _breakdown(), "2026-08-10T12:00:00+00:00")
+
+    assert form.quote_status_label.text() == ""
+
+
+def test_drift_shows_a_warning_badge_but_keeps_save_enabled(qtbot, form):
+    form.set_skus([_sku()])
+    form.set_printers([_printer()])
+    form.sku_combo.setCurrentIndex(1)
+    form.printer_combo.setCurrentIndex(1)
+
+    drift_msg = "true_cost: server=144.25 local=145.00"
+    form.set_quote_result(form._quote_seq, _quote_result(), drift=drift_msg)
+
+    assert form.save_btn.isEnabled()  # the server's numbers are still what's shown/submitted
+    assert "disagrees with the server" in form.quote_status_label.text()
+    assert form.quote_status_label.property("warning") is True
+
+
+def test_a_clean_quote_after_a_drifted_one_clears_the_badge(qtbot, form):
+    """The warning badge must not linger once a later quote agrees again."""
+    form.set_skus([_sku()])
+    form.set_printers([_printer()])
+    form.sku_combo.setCurrentIndex(1)
+    form.printer_combo.setCurrentIndex(1)
+    form.set_quote_result(form._quote_seq, _quote_result(), drift="direct_cost: server=1 local=2")
+    assert form.quote_status_label.text() != ""
+
+    form.set_quote_result(form._quote_seq, _quote_result(), drift=None)
+
+    assert form.quote_status_label.text() == ""
+    assert form.quote_status_label.property("warning") is False

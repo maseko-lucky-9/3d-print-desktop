@@ -130,6 +130,10 @@ def stylesheet() -> str:
         color: {t.STATUS_FAILED};
         font-weight: 600;
     }}
+    QLabel[warning="true"] {{
+        color: {t.STATUS_WARNING};
+        font-weight: 600;
+    }}
     QLabel[dim="true"] {{
         color: {t.TEXT_DIM};
         font-size: {t.FONT_SIZE_CAPTION}px;

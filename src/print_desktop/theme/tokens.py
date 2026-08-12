@@ -30,6 +30,7 @@ STATUS_PRINTING = "#3B82F6"  # blue-500
 STATUS_FAILED = "#EF4444"  # red-500
 STATUS_CANCELLED = "#71717A"  # zinc-500
 STATUS_SLICED = "#A1A1AA"  # zinc-400 — "Calculated" pre-send state
+STATUS_WARNING = "#F59E0B"  # amber-500 — local/server quote drift (Phase 6)
 
 # Radii
 RADIUS_INPUT = 12

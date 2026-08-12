@@ -25,6 +25,7 @@ from print_desktop.models.print_request import (
     PrintJob,
     QuoteResult,
 )
+from print_desktop.services.cost import QuoteBreakdown
 from print_desktop.ui.widgets.feature_icons import FeatureIcons
 from print_desktop.ui.widgets.manual_form import ManualForm
 from print_desktop.ui.widgets.project_card import ProjectCard
@@ -100,8 +101,11 @@ class HomeView(QWidget):
     def set_app_settings(self, s: AppSettings) -> None:
         self.form.set_app_settings(s)
 
-    def set_quote_result(self, seq: int, result: QuoteResult) -> None:
-        self.form.set_quote_result(seq, result)
+    def set_quote_result(self, seq: int, result: QuoteResult, drift: str | None = None) -> None:
+        self.form.set_quote_result(seq, result, drift)
+
+    def set_offline_quote_result(self, seq: int, breakdown: QuoteBreakdown, cached_at: str) -> None:
+        self.form.set_offline_quote_result(seq, breakdown, cached_at)
 
     def set_quote_error(self, seq: int, message: str) -> None:
         self.form.set_quote_error(seq, message)

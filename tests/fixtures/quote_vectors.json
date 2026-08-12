@@ -1,0 +1,141 @@
+{
+  "description": "Shared oracle for the costing formula (plan.md Phase 6). Same file, byte-identical, in both backend (tests/fixtures/quote_vectors.json) and 3d-print-desktop (tests/fixtures/quote_vectors.json) — one canonical set of input/output pairs that both independent implementations (backend/costing/engine.py and print_desktop/services/cost.py) must reproduce exactly. Every 'expected' value is 2dp, ROUND_HALF_UP, computed independently in Python Decimal before either implementation was trusted to reproduce it (see plan.md's worked example and its markup_on_cost cross-checks).",
+  "vectors": [
+    {
+      "name": "worked_example_margin_on_price",
+      "input": {
+        "grams": 128,
+        "cost_per_g": 0.45,
+        "print_hours": 6.7,
+        "power_watts": 180,
+        "electricity_tariff_per_kwh": 2.85,
+        "printer_purchase_price": 12000,
+        "printer_expected_life_hours": 4000,
+        "labour_minutes": 20,
+        "labour_rate_per_hour": 150,
+        "consumables_cost": 0,
+        "overhead_cost": 0,
+        "failure_pct": 10,
+        "margin_pct": 55,
+        "pricing_mode": "margin_on_price",
+        "vat_pct": 15
+      },
+      "expected": {
+        "filament_cost": 57.6,
+        "electricity_cost": 3.44,
+        "depreciation_cost": 20.1,
+        "labour_cost": 50.0,
+        "direct_cost": 131.14,
+        "failure_allowance": 13.11,
+        "true_cost": 144.25,
+        "price_ex_vat": 320.56,
+        "profit": 176.31,
+        "margin_pct_actual": 55.0,
+        "vat_amount": 48.08,
+        "price_incl_vat": 368.64
+      }
+    },
+    {
+      "name": "markup_on_cost_55pct_cross_check",
+      "input": {
+        "grams": 128,
+        "cost_per_g": 0.45,
+        "print_hours": 6.7,
+        "power_watts": 180,
+        "electricity_tariff_per_kwh": 2.85,
+        "printer_purchase_price": 12000,
+        "printer_expected_life_hours": 4000,
+        "labour_minutes": 20,
+        "labour_rate_per_hour": 150,
+        "consumables_cost": 0,
+        "overhead_cost": 0,
+        "failure_pct": 10,
+        "margin_pct": 55,
+        "pricing_mode": "markup_on_cost",
+        "vat_pct": 15
+      },
+      "expected": {
+        "filament_cost": 57.6,
+        "electricity_cost": 3.44,
+        "depreciation_cost": 20.1,
+        "labour_cost": 50.0,
+        "direct_cost": 131.14,
+        "failure_allowance": 13.11,
+        "true_cost": 144.25,
+        "price_ex_vat": 223.59,
+        "profit": 79.34,
+        "margin_pct_actual": 35.48,
+        "vat_amount": 33.54,
+        "price_incl_vat": 257.13
+      }
+    },
+    {
+      "name": "markup_on_cost_50pct_cross_check",
+      "input": {
+        "grams": 128,
+        "cost_per_g": 0.45,
+        "print_hours": 6.7,
+        "power_watts": 180,
+        "electricity_tariff_per_kwh": 2.85,
+        "printer_purchase_price": 12000,
+        "printer_expected_life_hours": 4000,
+        "labour_minutes": 20,
+        "labour_rate_per_hour": 150,
+        "consumables_cost": 0,
+        "overhead_cost": 0,
+        "failure_pct": 10,
+        "margin_pct": 50,
+        "pricing_mode": "markup_on_cost",
+        "vat_pct": 15
+      },
+      "expected": {
+        "filament_cost": 57.6,
+        "electricity_cost": 3.44,
+        "depreciation_cost": 20.1,
+        "labour_cost": 50.0,
+        "direct_cost": 131.14,
+        "failure_allowance": 13.11,
+        "true_cost": 144.25,
+        "price_ex_vat": 216.38,
+        "profit": 72.13,
+        "margin_pct_actual": 33.33,
+        "vat_amount": 32.46,
+        "price_incl_vat": 248.84
+      }
+    },
+    {
+      "name": "consumables_and_overhead_with_unrounded_inputs",
+      "input": {
+        "grams": 128,
+        "cost_per_g": 0.45,
+        "print_hours": 6.7,
+        "power_watts": 180,
+        "electricity_tariff_per_kwh": 2.85,
+        "printer_purchase_price": 12000,
+        "printer_expected_life_hours": 4000,
+        "labour_minutes": 20,
+        "labour_rate_per_hour": 150,
+        "consumables_cost": 15.756,
+        "overhead_cost": 8.333,
+        "failure_pct": 10,
+        "margin_pct": 55,
+        "pricing_mode": "margin_on_price",
+        "vat_pct": 15
+      },
+      "expected": {
+        "filament_cost": 57.6,
+        "electricity_cost": 3.44,
+        "depreciation_cost": 20.1,
+        "labour_cost": 50.0,
+        "direct_cost": 155.23,
+        "failure_allowance": 15.52,
+        "true_cost": 170.75,
+        "price_ex_vat": 379.44,
+        "profit": 208.69,
+        "margin_pct_actual": 55.0,
+        "vat_amount": 56.92,
+        "price_incl_vat": 436.36
+      }
+    }
+  ]
+}
