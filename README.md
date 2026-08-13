@@ -14,7 +14,7 @@
 
 ## Why no in-app slicing?
 
-BambuStudio CLI and OrcaSlicer (stable + nightly) both segfault on macOS ARM64 when slicing with P1S profiles. The original spike record no longer exists; a re-spike is needed before this can be resolved. See `docs/decisions/002-no-in-app-slicing.md` for the decision and the re-spike requirements. Until then, slicing happens in the BambuStudio GUI and this app is the cost-calculation + history layer.
+BambuStudio CLI (stable + nightly) segfaults on macOS ARM64 when slicing with P1S profiles. The original spike record no longer exists; a re-spike is needed before this can be resolved. See `docs/decisions/002-no-in-app-slicing.md` for the decision and the re-spike requirements. Until then, slicing happens in the BambuStudio GUI and this app is the cost-calculation + history layer.
 
 ## Stack
 
@@ -49,4 +49,3 @@ open dist/PrintDesktop.app
 
 Companion repo: `git@github.com:maseko-lucky-9/3d-printing-cost-calculator-app.git`.
 Default backend URL: `https://print-calc.homelab` (Tailscale only).
-
