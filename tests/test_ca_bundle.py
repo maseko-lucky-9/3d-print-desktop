@@ -172,8 +172,9 @@ def test_live_leaf_certificate_is_issued_by_the_bundled_ca():
     isolation -- none of them can tell a well-formed, correctly-identified
     CA apart from one that no longer matches what the backend actually
     presents (e.g. after a CA rotation that updated only one side). This
-    cross-checks the live leaf certificate's issuer against the bundled
-    root's own subject.
+    fetches the live leaf certificate and cryptographically verifies it
+    chains to the bundled root (`openssl verify`), plus a redundant DN
+    comparison for a more specific failure message.
 
     Best-effort, not a CI gate: GitHub-hosted runners cannot reach
     print-calc.homelab at all (the ingress only accepts the homelab LAN
@@ -193,6 +194,23 @@ def test_live_leaf_certificate_is_issued_by_the_bundled_ca():
         f.write(leaf_pem)
         leaf_path = f.name
     try:
+        # The real check: issuer/subject DNs can match by name alone even
+        # between two genuinely different CAs -- e.g. a rotation that
+        # regenerates "Homelab Local CA" under a new keypair would still
+        # produce identical-looking strings below. `openssl verify`
+        # actually validates the cryptographic signature chain, which name
+        # matching cannot.
+        verify = subprocess.run(
+            ["openssl", "verify", "-CAfile", str(CA_BUNDLE_PATH), leaf_path],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert verify.returncode == 0, (
+            f"live leaf certificate does not chain to the bundled CA "
+            f"({leaf_path}): {verify.stdout}{verify.stderr}"
+        )
+
         result = subprocess.run(
             ["openssl", "x509", "-in", leaf_path, "-noout", "-issuer"],
             capture_output=True,
@@ -204,6 +222,8 @@ def test_live_leaf_certificate_is_issued_by_the_bundled_ca():
     finally:
         Path(leaf_path).unlink(missing_ok=True)
 
+    # Redundant with the crypto verify above, kept for a more specific
+    # failure message when it's the DN (not the signature) that's wrong.
     bundled_subject = _normalize_dn(_openssl_x509("-subject")).removeprefix("subject=").strip()
 
     assert leaf_issuer == bundled_subject, (
