@@ -21,7 +21,13 @@ The homelab backend uses a self-signed CA at `print-calc.homelab`. The app expec
 1. Get the cert from the homelab K8s secret: `kubectl get secret homelab-ca -n cert-manager -o jsonpath='{.data.ca\.crt}' | base64 -d > homelab-ca.pem`
 2. Drop into the repo root before `python setup.py py2app`, or trust it system-wide via Keychain Access → System → drag in → Always Trust.
 
-The CA expires March 2027. Plan a renewal job before then.
+`tests/test_ca_bundle.py` checks the bundled cert's actual expiry on every
+CI run (including a weekly schedule, so an unrenewed CA is caught even if
+nothing else touches this repo) — check that test's CI status rather than
+this line for the real expiry date. (An earlier version of this doc hand-
+tracked "expires March 2027" here; that number was wrong by about nine
+years even when it was written, which is exactly the failure mode a
+human-maintained date invites.)
 
 ## Connection refused / timeout
 

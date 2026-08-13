@@ -5,9 +5,18 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly, independent of any push/PR: tests/test_ca_bundle.py's expiry
+  # check is only as good as its last run. This repo has already gone
+  # three months (2026-05-10 to 2026-08-07) with CI silently broken and
+  # nobody noticing (see plan.md's F4 in the paired backend repo) -- a
+  # wall-clock assertion that only fires on code changes gives zero
+  # warning if nobody touches this repo as the cert approaches expiry.
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
 
 jobs:
   test-linux:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +43,41 @@ jobs:
       - name: Audit dependencies
         run: uv run pip-audit --strict || true
 
+  ca-bundle-check:
+    # Weekly-only: the push/pull_request-triggered test-linux job above
+    # already runs this same test file on every code change. This job
+    # exists purely to catch the calendar approaching the cert's expiry
+    # with nobody having touched the repo -- see the schedule trigger's
+    # comment at the top of this file.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.x"
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install Qt system libraries
+        # test_ca_bundle.py imports print_desktop.__main__ (for its
+        # _bundled_ca_path tests), which imports PySide6.QtWidgets at
+        # module level -- these libs are needed just to import it, not
+        # only to actually launch a window.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 \
+            libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon0 \
+            libfontconfig1 libx11-xcb1
+      - name: Install
+        run: uv sync --all-extras
+      - name: Check the bundled CA cert
+        run: xvfb-run -a uv run pytest tests/test_ca_bundle.py -v
+
   build-macos:
+    if: github.event_name != 'schedule'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4

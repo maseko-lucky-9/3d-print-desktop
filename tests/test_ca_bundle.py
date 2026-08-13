@@ -35,6 +35,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -163,6 +164,53 @@ def test_ca_bundle_loads_as_a_valid_trust_anchor():
     checks above don't exercise."""
     ctx = ssl.create_default_context()
     ctx.load_verify_locations(cafile=str(CA_BUNDLE_PATH))
+
+
+@_needs_openssl
+def test_live_leaf_certificate_is_issued_by_the_bundled_ca():
+    """Every other check in this file validates the bundled file in
+    isolation -- none of them can tell a well-formed, correctly-identified
+    CA apart from one that no longer matches what the backend actually
+    presents (e.g. after a CA rotation that updated only one side). This
+    cross-checks the live leaf certificate's issuer against the bundled
+    root's own subject.
+
+    Best-effort, not a CI gate: GitHub-hosted runners cannot reach
+    print-calc.homelab at all (the ingress only accepts the homelab LAN
+    and Tailscale ranges) -- this always skips there, by design, rather
+    than failing on an environment it was never going to be able to
+    verify against. It runs for real from anywhere with actual network
+    access, and is most useful right after a CA rotation to confirm both
+    sides agree.
+    """
+    host = "print-calc.homelab"
+    try:
+        leaf_pem = ssl.get_server_certificate((host, 443), timeout=5)
+    except (OSError, ssl.SSLError) as exc:
+        pytest.skip(f"{host}:443 unreachable from this environment: {exc}")
+
+    with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as f:
+        f.write(leaf_pem)
+        leaf_path = f.name
+    try:
+        result = subprocess.run(
+            ["openssl", "x509", "-in", leaf_path, "-noout", "-issuer"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, f"failed to parse the fetched leaf cert: {result.stderr}"
+        leaf_issuer = _normalize_dn(result.stdout).removeprefix("issuer=").strip()
+    finally:
+        Path(leaf_path).unlink(missing_ok=True)
+
+    bundled_subject = _normalize_dn(_openssl_x509("-subject")).removeprefix("subject=").strip()
+
+    assert leaf_issuer == bundled_subject, (
+        f"live leaf certificate's issuer ({leaf_issuer!r}) does not match the bundled "
+        f"CA's subject ({bundled_subject!r}) -- the backend may be presenting a "
+        "certificate from a different (e.g. rotated) CA than the one bundled in this app"
+    )
 
 
 def test_bundled_ca_path_resolves_via_resourcepath_when_frozen(tmp_path, monkeypatch):
