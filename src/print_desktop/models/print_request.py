@@ -167,6 +167,11 @@ class PrintJob(BaseModel):
     created_at: str
     started_at: str | None = None
     finished_at: str | None = None
+    # The backend has always returned this; the model just never declared it,
+    # so pydantic's default extra="ignore" dropped it and ProjectCard._title_for
+    # raised AttributeError on every card render. Cards are the home grid, so
+    # the whole Projects view came up empty in the packaged app.
+    notes: str | None = None
 
 
 class PrinterStatus(BaseModel):

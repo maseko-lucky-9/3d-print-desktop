@@ -43,7 +43,14 @@ if ca_path.exists():
 OPTIONS = {
     "argv_emulation": False,
     "packages": ["print_desktop"],
-    "includes": ["qasync", "qtawesome"],
+    # httpx delegates async I/O to anyio, which resolves its backend at runtime
+    # via importlib.import_module(f"anyio._backends._{name}"). py2app's static
+    # modulegraph never sees that string, so it drops anyio/_backends/ entirely
+    # and every httpx call in the packaged .app raises
+    # ModuleNotFoundError("No module named 'anyio._backends'") — the app opens
+    # fine and then silently fails every backend request. See
+    # tests/test_py2app_hidden_imports.py.
+    "includes": ["qasync", "qtawesome", "anyio._backends._asyncio"],
     "iconfile": str(ROOT / "resources" / "icon.icns") if (ROOT / "resources" / "icon.icns").exists() else None,
     "plist": {
         "CFBundleName": "3D Print Desktop",
