@@ -117,6 +117,20 @@ jobs:
         run: uv sync --extra build
       - name: Build .app
         run: uv run python setup.py py2app
+      # Installed AFTER the build on purpose: py2app's modulegraph pulls in
+      # whatever it can reach, and a local build done with the dev extras
+      # present bundled 101 hypothesis entries. Syncing them before the build
+      # would fatten the artifact users download.
+      - name: Install test deps
+        run: uv sync --extra build --extra dev
+      # The only place this can ever run: test-linux has no dist/, and
+      # build-macos builds with -A (alias mode links to live site-packages and
+      # bundles nothing to inspect). This job already pays for the full build,
+      # so it is the one chance to assert the artifact users install actually
+      # contains anyio's lazily-imported backend -- the failure the declarative
+      # `includes` check cannot catch. See tests/test_py2app_hidden_imports.py.
+      - name: Verify hidden imports made it into the bundle
+        run: uv run pytest tests/test_py2app_hidden_imports.py -v
       - name: Verify bundle
         run: |
           test -d "dist/3D Print Desktop.app"
