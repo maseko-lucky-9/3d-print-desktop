@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QTimer
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QInputDialog, QMainWindow, QMessageBox, QTabWidget
 
 from print_desktop import __version__
 from print_desktop.models.print_request import JobPayload, Printer
