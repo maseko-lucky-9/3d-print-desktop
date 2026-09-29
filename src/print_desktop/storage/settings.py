@@ -22,6 +22,7 @@ class Settings:
     # Backend
     backend_url: str = "https://print-calc.homelab"
     ca_cert_path: str = ""  # bundled with .app; resolved at runtime
+    makerworld_session_cookie: str = ""  # MakerWorld browser session cookie for model imports
 
     # Window state (managed by MainWindow)
     window_geometry: str = ""  # base64-encoded QByteArray

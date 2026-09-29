@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QTimer
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QInputDialog, QMainWindow, QMessageBox, QTabWidget
 
 from print_desktop import __version__
 from print_desktop.models.print_request import JobPayload, Printer
@@ -82,6 +82,13 @@ class MainWindow(QMainWindow):
     def _build_menu_bar(self) -> None:
         menu = self.menuBar()
         file_menu = menu.addMenu("File")
+
+        cookie_act = QAction("MakerWorld cookie…", self)
+        cookie_act.triggered.connect(self._on_set_cookie)
+        file_menu.addAction(cookie_act)
+
+        file_menu.addSeparator()
+
         quit_act = QAction("Quit", self)
         quit_act.setShortcut(QKeySequence.Quit)
         quit_act.triggered.connect(self.close)
@@ -101,6 +108,20 @@ class MainWindow(QMainWindow):
             "Built with PySide6.<br>"
             "Source: github.com/maseko-lucky-9/3d-print-desktop",
         )
+
+    def _on_set_cookie(self) -> None:
+        text, ok = QInputDialog.getMultiLineText(
+            self,
+            "MakerWorld session cookie",
+            "Paste your makerworld.com Cookie header",
+            self._settings.makerworld_session_cookie,
+        )
+        if not ok:
+            return
+        self._settings.makerworld_session_cookie = text.strip()
+        save_settings(self._settings)
+        self._client.set_makerworld_cookie(self._settings.makerworld_session_cookie)
+        QMessageBox.information(self, "MakerWorld cookie", "Cookie saved.")
 
     # ── Window state restoration (§17 N5) ──────────────────────────────────
 
@@ -346,6 +367,9 @@ class MainWindow(QMainWindow):
             imp = await self._client.import_makerworld(url)
             result = await wait_for_makerworld(self._client, imp.id, timeout_seconds=60)
         except Exception as exc:
+            # Transport-level failure (backend unreachable, timeout, 5xx): show the raw
+            # error. The cookie-expiry hint belongs only on the failed-status path below,
+            # where the backend reached MakerWorld and the import genuinely failed.
             QMessageBox.critical(self, "MakerWorld import failed", str(exc))
             return
         if result.status == "success":
@@ -356,7 +380,13 @@ class MainWindow(QMainWindow):
                 "Open it in BambuStudio to slice, then come back to enter cost details.",
             )
         else:
-            QMessageBox.warning(self, "Import failed", result.error_message or "Unknown error")
+            message = result.error_message or "Unknown error"
+            if self._settings.makerworld_session_cookie:
+                message += (
+                    "\n\nYour MakerWorld cookie may have expired. "
+                    "Re-copy it via File > MakerWorld cookie..."
+                )
+            QMessageBox.warning(self, "Import failed", message)
 
     def _on_feature_clicked(self, slug: str) -> None:
         if slug == "makerworld":
