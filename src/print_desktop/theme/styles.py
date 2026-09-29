@@ -126,6 +126,14 @@ def stylesheet() -> str:
     QLabel[muted="true"] {{
         color: {t.TEXT_MUTED};
     }}
+    QLabel[error="true"] {{
+        color: {t.STATUS_FAILED};
+        font-weight: 600;
+    }}
+    QLabel[warning="true"] {{
+        color: {t.STATUS_WARNING};
+        font-weight: 600;
+    }}
     QLabel[dim="true"] {{
         color: {t.TEXT_DIM};
         font-size: {t.FONT_SIZE_CAPTION}px;

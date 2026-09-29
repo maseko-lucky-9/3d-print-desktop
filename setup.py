@@ -34,17 +34,24 @@ ENTRY = ROOT / "src" / "print_desktop" / "__main__.py"
 DATA_FILES = []
 ca_path = ROOT / "homelab-ca.pem"
 if ca_path.exists():
-    DATA_FILES.append(("", ["homelab-ca.pem"]))
+    # setuptools' data_files requires paths relative to this setup.py's
+    # directory ("/-separated", never absolute) — an absolute path here
+    # makes plain `uv sync` / `pip install -e .` fail at the editable-wheel
+    # build step, not just py2app builds.
+    DATA_FILES.append(("", [ca_path.relative_to(ROOT).as_posix()]))
 
 OPTIONS = {
     "argv_emulation": False,
     "packages": ["print_desktop"],
-    "includes": ["qasync", "qtawesome"],
-    "iconfile": (
-        str(ROOT / "resources" / "icon.icns")
-        if (ROOT / "resources" / "icon.icns").exists()
-        else None
-    ),
+    # httpx delegates async I/O to anyio, which resolves its backend at runtime
+    # via importlib.import_module(f"anyio._backends._{name}"). py2app's static
+    # modulegraph never sees that string, so it drops anyio/_backends/ entirely
+    # and every httpx call in the packaged .app raises
+    # ModuleNotFoundError("No module named 'anyio._backends'") — the app opens
+    # fine and then silently fails every backend request. See
+    # tests/test_py2app_hidden_imports.py.
+    "includes": ["qasync", "qtawesome", "anyio._backends._asyncio"],
+    "iconfile": str(ROOT / "resources" / "icon.icns") if (ROOT / "resources" / "icon.icns").exists() else None,
     "plist": {
         "CFBundleName": "3D Print Desktop",
         "CFBundleDisplayName": "3D Print Desktop",

@@ -24,6 +24,12 @@ class ProjectCard(QFrame):
         # Top row: title + status badge
         head = QHBoxLayout()
         title = QLabel(self._title_for(job), self)
+        # `notes` is backend-supplied and reaches this label verbatim. QLabel
+        # defaults to Qt.AutoText, which parses anything markup-shaped as rich
+        # text -- a job whose notes open with a tag could spoof a status, hide
+        # its own title, or blank the card, and the 32-char truncation in
+        # _title_for counts markup characters so a cut tag mangles the label.
+        title.setTextFormat(Qt.PlainText)
         title.setProperty("heading", True)
         title.setWordWrap(False)
         title.setMaximumWidth(180)
